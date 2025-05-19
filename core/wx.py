@@ -79,7 +79,7 @@ def get_Articles(faker_id:str):
         data = json.loads(data)  # 手动解析
         data['publish_page']=json.loads(data['publish_page'])
     except Exception as e:
-        print(f"请求失败: {e}")
+        print(f"请求失败: {e}",data)
     return data
 #通过公众号文章链接获取公众号id
 def get_id(url:str)->str:

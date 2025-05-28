@@ -13,7 +13,6 @@ if exist %version_file% (
     echo 警告：未找到对应版本号的文件 %version_file%
 )
 echo %comment%
-pause 
 git add .
 git tag  "v%VERSION%" -m "%comment%"
 git commit -m "%comment%"

@@ -8,7 +8,7 @@ echo 当前版本: %VERSION% TAG: %tag%
 set comment="%1"
 set version_file="docs/versions/%VERSION%"
 if exist %version_file% (
-    for /f " delims=" %%a in (%version_file%) do set comment=%%a
+    for /f "usebackq delims=" %%a in (%version_file%) do set comment=%%a
 ) else (
     echo 警告：未找到对应版本号的文件 %version_file%
 )

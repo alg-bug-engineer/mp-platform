@@ -19,7 +19,7 @@ if exist %version_file% (
 
 echo %comment%
 git add .
-@REM git tag  "v%VERSION%" -m "%comment%"
+git tag  "v%VERSION%" -m "%comment%"
 git commit -m "%VERSION%"
 git push -u origin main 
-@REM git push origin  %tag%
+git push origin  %tag%

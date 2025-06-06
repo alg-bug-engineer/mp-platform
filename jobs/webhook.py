@@ -76,15 +76,15 @@ def call_webhook(hook: MessageWebHook) -> str:
     }
     payload = parser.render(data)
     
-    # 检查webhook_url是否为空
-    if not hook.task.webhook_url:
+    # 检查web_hook_url是否为空
+    if not hook.task.web_hook_url:
         raise ValueError("Webhook URL不能为空")
         
     # 发送webhook请求
     import requests
     try:
         response = requests.post(
-            hook.task.webhook_url,
+            hook.task.web_hook_url,
             data=payload,
             headers={"Content-Type": "application/json"}
         )

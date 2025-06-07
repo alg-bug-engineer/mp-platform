@@ -123,7 +123,7 @@ class Db:
         else:
             # 检查会话是否有效
             try:
-                self._session.execute("SELECT 1")
+                self._session.execute(Text("SELECT 1"))
             except:
                 self.close()
                 self.init(self.connection_str)

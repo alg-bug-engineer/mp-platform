@@ -23,12 +23,11 @@ def send_message(hook: MessageWebHook) -> str:
         str: 格式化后的消息内容
     """
     template = hook.task.message_template if hook.task.message_template else """
-    订阅源信息:
-    # 名称:{{feed.mp_name}}\n
+    \n# {{feed.mp_name}}\n
     # 最新文章:\n
     {% if articles %}
     {% for article in articles %}
-    - {{ article.title }} ({{ article.pub_date }})\n
+    - [{{ article.title }}]({{}article.url}) ({{ article.publish_time }})\n
     {% endfor %}
     {% else %}
     - 暂无文章\n

@@ -46,13 +46,7 @@ echo %COMMENT_FLAG%
 if %COMMENT_FLAG%==1 (
     set comment=%USER_COMMENT%
 ) else (
-    @REM set comment="%VERSION% release"
-    @REM set version_file="docs/versions/%VERSION%"
-    @REM if exist %version_file% (
-    @REM     for /f "usebackq delims=" %%a in (%version_file%) do set comment=%%a
-    @REM ) else (
-    @REM     echo "警告：未找到对应版本号的文件%version_file%"
-    @REM )
+    set comment=%VERSION%
 )
 
 echo "%comment%"

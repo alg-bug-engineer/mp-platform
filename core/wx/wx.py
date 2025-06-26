@@ -4,7 +4,7 @@ import re
 import datetime
 from datetime import datetime, timezone
 # from core.config import cfg
-from .cfg import wx_cfg
+from .cfg import wx_cfg,cfg
 import core.db as db
 
 def dateformat(timestamp:any):

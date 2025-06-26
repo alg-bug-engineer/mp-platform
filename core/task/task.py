@@ -105,7 +105,7 @@ class TaskScheduler:
                     trigger=trigger,
                     args=args,
                     kwargs=kwargs,
-                    id=job_id
+                    id=str(job_id)
                 )
                 self._jobs[job.id] = job
                 logger.info(f"Successfully added job {job.id}")
@@ -127,6 +127,20 @@ class TaskScheduler:
                 del self._jobs[job_id]
                 return True
             return False
+    
+    def clear_all_jobs(self) -> int:
+        """
+        清除所有任务
+        
+        :return: 被删除的任务数量
+        """
+        with self._lock:
+            job_count = len(self._jobs)
+            if job_count > 0:
+                self._scheduler.remove_all_jobs()
+                self._jobs.clear()
+                logger.info(f"Removed all {job_count} jobs")
+            return job_count
     
     def start(self) -> None:
         """启动调度器"""

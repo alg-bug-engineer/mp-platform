@@ -45,7 +45,8 @@ def do_job(mps:list[Feed]=None,task:MessageTask=None):
             try:
                 wx.get_Articles(item.faker_id,CallBack=UpdateArticle,Mps_id=item.id,Mps_title=item.mp_name, MaxPage=1,Over_CallBack=Update_Over,interval=interval)
             except Exception as e:
-                print(e)
+                print_error(e)
+                # raise
             finally:
                 count=wx.all_count()
                 all_count+=count
@@ -70,6 +71,11 @@ def get_feeds(task:MessageTask=None):
         mps=wx_db.get_all_mps()
      return mps
 scheduler=TaskScheduler()
+def reload_job():
+    print_success("重载任务")
+    scheduler.clear_all_jobs()
+    start_job()
+
 def start_job():
     #开启自动同步未同步 文章任务
     from jobs.fetch_no_article import start_sync_content
@@ -89,7 +95,7 @@ def start_job():
             cron_exp="* * * * *"
             # cron_exp="* * * * * *"
             pass
-        job_id=scheduler.add_cron_job(add_job,cron_expr=cron_exp,args=[get_feeds(task),task])
+        job_id=scheduler.add_cron_job(add_job,cron_expr=cron_exp,args=[get_feeds(task),task],job_id=str(task.id))
         print(f"已添加任务: {job_id}")
     scheduler.start()
     print("启动任务")

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { listMessageTasks, deleteMessageTask } from '@/api/messageTask'
+import { listMessageTasks, deleteMessageTask,FreshJobApi,FreshJobByIdApi } from '@/api/messageTask'
 import type { MessageTask } from '@/types/messageTask'
 import { useRouter } from 'vue-router'
+import { Message } from '@arco-design/web-vue'
 
 const parseCronExpression = (exp: string) => {
   const parts = exp.split(' ')
@@ -91,6 +92,12 @@ const handlePageChange = (page: number) => {
 const handleAdd = () => {
   router.push('/message-tasks/add')
 }
+const FreshJob = () => {
+  FreshJobApi().then((data) => {
+    console.log("刷新任务")
+    Message.success(data.message||"刷新任务成功")
+  })
+}
 
 const handleEdit = (id: number) => {
   router.push(`/message-tasks/edit/${id}`)
@@ -120,6 +127,7 @@ onMounted(() => {
       <div class="header">
         <h2>消息任务列表</h2>
         <a-button type="primary" @click="handleAdd">添加消息任务</a-button>
+        <a-button type="primary" @click="FreshJob">应用</a-button>
       </div>
       <a-alert type="info" closable>
         注意：只有添加了任务消息才会定时执行更新任务
@@ -177,6 +185,14 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+}
+
+.header h2 {
+  flex: 1;
+}
+
+.header .arco-btn {
+  margin-left: 10px;
 }
 
 h2 {

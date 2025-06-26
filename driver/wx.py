@@ -11,6 +11,7 @@ import os
 import re
 from threading import Thread
 from threading import Timer
+from .cookies import expire
 import json
 from core.print import print_error
 class Wx:
@@ -189,10 +190,7 @@ class Wx:
             wait = WebDriverWait(controller.driver, 120)
             wait.until(EC.url_contains(self.WX_HOME))
             self.CallBack=CallBack
-          
-            
             self.Call_Success()
-            
             self.schedule_refresh(interval=refresh_interval)
         except NameError as e:
             # 修正此处，确保异常处理逻辑正确
@@ -210,6 +208,25 @@ class Wx:
                 self.Clean()
                 controller.close()
         return self.SESSION
+    def format_token(self,cookies:any,token=""):
+        cookies_str=""
+        for cookie in cookies:
+            # print(f"{cookie['name']}={cookie['value']}")
+            cookies_str+=f"{cookie['name']}={cookie['value']}; "
+        if token=="":
+            for cookie in cookies:
+                if 'token' in cookie['name'].lower():
+                    token= cookie['value']
+                    break
+        # 计算 slave_sid cookie 有效时间
+        cookie_expiry = expire(cookies)
+        return{
+                'cookies': cookies,
+                'cookies_str': cookies_str,
+                'token': token,
+                'wx_login_url': self.wx_login_url,
+                'expiry': cookie_expiry
+            }
     def Call_Success(self):
         print("登录成功！")
         self.HasLogin=True
@@ -219,39 +236,9 @@ class Wx:
         # 获取当前所有cookie
         cookies = self.controller.driver.get_cookies()
         # print("\n获取到的Cookie:")
-        cookies_str=""
-        for cookie in cookies:
-            # print(f"{cookie['name']}={cookie['value']}")
-            cookies_str+=f"{cookie['name']}={cookie['value']}; "
-        if token:
-            print(f"\nToken: {token}")
-        
-        # 计算 slave_sid cookie 有效时间
-        cookie_expiry = None
-        for cookie in cookies:
-            if cookie['name'] == 'slave_sid' and 'expiry' in cookie:
-                try:
-                    expiry_time = float(cookie['expiry'])
-                    remaining_time = expiry_time - time.time()
-                    if remaining_time > 0:
-                        cookie_expiry = {
-                            'expiry_timestamp': expiry_time,
-                            'remaining_seconds': int(remaining_time),
-                            'expiry_time': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(expiry_time))
-                        }
-                    break
-                except ValueError:
-                    print(f"slave_sid 的过期时间戳无效: {cookie['expiry']}")
-                    break
-
-        self.SESSION= {
-            'cookies': cookies,
-            'cookies_str': cookies_str,
-            'token': token,
-            'wx_login_url': self.wx_login_url,
-            'expiry': cookie_expiry
-        }
+        self.SESSION=self.format_token(cookies,token)
         self.HasLogin=True
+        self.Clean()
         # print(cookie_expiry)
         if self.CallBack is not None:
             self.CallBack(self.SESSION)
@@ -286,4 +273,8 @@ class Wx:
         except Exception as e:
             print(f"设置cookie过期时出错: {str(e)}")
             return False
+
+def DoSuccess(cookies:any) -> dict:
+    data=WX_API.format_token(cookies)
+    Success(data)
 WX_API = Wx()

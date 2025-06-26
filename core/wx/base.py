@@ -1,7 +1,7 @@
 import requests
 import json
 from core.models import Feed
-
+from driver.wx import DoSuccess
 from core.db import DB
 from core.models.feed import Feed
 from .cfg import cfg,wx_cfg
@@ -25,8 +25,9 @@ class WxGather:
     def __init__(self,is_add:bool=False):
         self.articles=[]
         self.is_add=is_add
+        self._cookies={}
         session=  requests.Session()
-        timeout = (5, 10)
+        timeout = (5, 10)  
         session.timeout = timeout
         self.session=session
         self.get_token()
@@ -113,6 +114,9 @@ class WxGather:
         print(f"开始")
         self.articles=[]
         self.get_token()
+        if self.token=="" or self.token is None:
+             self.Error("请先扫码登录公众号平台")
+             return
         import time
         self.update_mps(mp_id,Feed(
           sync_time=int(time.time()),
@@ -121,6 +125,10 @@ class WxGather:
 
     def Item_Over(self,item=None,CallBack=None):
         print(f"item end")
+        _cookies=[{'name': c.name, 'value': c.value, 'domain': c.domain,'expiry':c.expires,'expires':c.expires} for c in self._cookies]
+        _cookies.append({'name':'token','value':self.token})
+        if len(_cookies) > 0:   
+            DoSuccess(_cookies)
         if CallBack is not None:
             CallBack(item)
         pass
@@ -130,9 +138,9 @@ class WxGather:
     def Over(self,CallBack=None):
         if getattr(self, 'articles', None) is not None:
             print(f"成功{len(self.articles)}条")
+          
         if CallBack is not None:
             CallBack(self)
-
 
     def dateformat(self,timestamp:any):
         from datetime import datetime, timezone

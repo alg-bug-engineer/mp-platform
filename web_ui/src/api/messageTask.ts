@@ -19,6 +19,12 @@ export const createMessageTask = (data: MessageTaskUpdate) => {
 export const updateMessageTask = (id: number, data: MessageTaskUpdate) => {
   return http.put(`/wx/message_tasks/${id}`, data)
 }
+export const FreshJobApi = () => {
+  return http.put(`/wx/message_tasks/job/fresh`)
+}
+export const FreshJobByIdApi = (id: number, data: MessageTaskUpdate) => {
+  return http.put(`/wx/message_tasks/job/fresh/${id}`, data)
+}
 
 export const deleteMessageTask = (id: number) => {
   return http.delete(`/wx/message_tasks/${id}`)

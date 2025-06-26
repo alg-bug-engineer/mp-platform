@@ -184,7 +184,16 @@ async def update_message_task(
     except Exception as e:
         db.rollback()
         return error_response(code=500, message=str(e))
-
+@router.put("/job/fresh",summary="重载任务")
+async def fresh_message_task(
+     current_user: dict = Depends(get_current_user)
+):
+    """
+    重载任务
+    """
+    from jobs.mps import reload_job
+    reload_job()
+    return success_response(message="任务已经重载成功")
 @router.delete("/{task_id}",summary="删除消息任务")
 async def delete_message_task(
     task_id: int,

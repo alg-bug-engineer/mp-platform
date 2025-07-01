@@ -134,3 +134,26 @@ class RSS:
             return pattern.sub(r'\1/static/res/logo/\2', text)
         except:
             return text
+            
+    def clear_cache(self,mp_id:str=""):
+
+        """清除所有缓存文件
+        
+        删除data/cache/rss和data/cache/content目录中包含'mp_id'的文件
+        保持与现有方法相同的路径安全检查机制
+        """
+        import shutil
+        
+        # 清除rss缓存目录
+        if os.path.exists(self.cache_dir):
+            for filename in os.listdir(self.cache_dir):
+                if f'{mp_id}_' not in filename:
+                    continue
+                file_path = os.path.normpath(f"{self.cache_dir}/{filename}")
+                if not file_path.startswith(self.cache_dir):
+                    raise ValueError("Invalid file path: Path traversal detected.")
+                try:
+                    if os.path.isfile(file_path):
+                        os.unlink(file_path)
+                except Exception as e:
+                    print(f"Error deleting {file_path}: {e}")

@@ -149,7 +149,7 @@ onMounted(() => {
         @page-change="handlePageChange"
       >
         <template #columns>
-          <a-table-column title="ID" data-index="id" />
+          <!-- <a-table-column title="ID" data-index="id" /> -->
           <a-table-column title="名称" data-index="name" ellipsis :width="200"/>
           <!-- <a-table-column title="类型" data-index="message_type" ellipsis /> -->
           <a-table-column title="cron表达式">

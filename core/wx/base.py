@@ -6,7 +6,7 @@ from core.db import DB
 from core.models.feed import Feed
 from .cfg import cfg,wx_cfg
 from core.print import print_error,print_info
-
+from core.rss import RSS
 # 定义基类
 class WxGather:
     articles=[]
@@ -140,10 +140,17 @@ class WxGather:
             send_wx_code(f"公众号平台登录失效,请重新登录")
             pass
         raise Exception(error)
+
     def Over(self,CallBack=None):
         if getattr(self, 'articles', None) is not None:
             print(f"成功{len(self.articles)}条")
-          
+            rss=RSS()
+            mp_id=""
+            try:
+                mp_id=self.articles[0]['mp_id']
+            except:
+                pass
+            rss.clear_cache(mp_id=mp_id)  
         if CallBack is not None:
             CallBack(self)
 

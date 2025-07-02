@@ -33,6 +33,12 @@ rss:
   base_url: ${RSS_BASE_URL:-}
   #是否为本地RSS链接，默认True，当为False时直接出外部链接
   local: ${RSS_LOCAL:-False}
+  #RSS标题
+  title: ${RSS_TITLE:-}
+  #RSS描述
+  description: ${RSS_DESCRIPTION:-}
+  #RSS封面
+  cover: ${RSS_COVER:-}
   #是否显示全文 默认False
   full_context: ${RSS_FULL_CONTEXT:-False}
   #是否添加封面图片 默认False

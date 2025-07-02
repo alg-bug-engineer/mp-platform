@@ -166,14 +166,14 @@ async def update_rss_feeds(
 
 
 
-@router.get("/{feed_id}", summary="获取公众号文章Atom")
+@router.get("/{feed_id}", summary="获取公众号文章")
 async def get_mp_articles_source(
     request: Request,
     feed_id: str,
     ext:str="xml",
-    limit: int = Query(10, ge=1, le=30),
+    limit: int = Query(10, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    is_update:bool=False
+    is_update:bool=True,
     # current_user: dict = Depends(get_current_user)
 ):
     rss=RSS(name=f'{feed_id}_{limit}_{offset}',ext=ext)
@@ -188,7 +188,17 @@ async def get_mp_articles_source(
         from core.models.article import Article
         
         # 查询公众号信息
-        feed = session.query(Feed).filter(Feed.id == feed_id).first()
+        feed = session.query(Feed)
+        query=session.query(Article)
+        rss_domain=cfg.get("rss.base_url",request.base_url)
+        if feed_id!="all":
+            feed=feed.filter(Feed.id == feed_id).first()
+            query=session.query(Article).filter(Article.mp_id == feed_id)
+        else:
+            feed=Feed()
+            feed.mp_name=cfg.get("rss.title","WeRss")
+            feed.mp_intro=cfg.get("rss.description","WeRss高效订阅我的公众号")
+            feed.mp_cover=cfg.get("rss.cover",f"{rss_domain}/logo.svg")    
         if not feed:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -197,12 +207,11 @@ async def get_mp_articles_source(
                     message="公众号不存在"
                 )
             )
-        
+      
         # 查询文章列表
-        total = session.query(Article).filter(Article.mp_id == feed_id).count()
-        articles = session.query(Article).filter(Article.mp_id == feed_id)\
-            .order_by(Article.publish_time.desc()).limit(limit).offset(offset).all()
-        rss_domain=cfg.get("rss.base_url",request.base_url)
+        total = query.count()
+        articles = query.order_by(Article.publish_time.desc()).limit(limit).offset(offset).all()
+    
         # 转换为RSS格式数据
         import datetime
         rss_list = [{
@@ -242,31 +251,13 @@ async def get_mp_articles_source(
     
 
 
-@feed_router.get("/{feed_id}.atom", summary="获取公众号文章Atom")
-async def atom(
-    request: Request,
-    feed_id: str,
-    limit: int = Query(10, ge=1, le=30),
-    offset: int = Query(0, ge=0),
-    is_update:bool=False
-):
-    return await get_mp_articles_source(request=request,feed_id=feed_id, limit=limit,offset=offset, is_update=is_update,ext="atom")
-@feed_router.get("/{feed_id}.json", summary="获取公众号文章Json")
-async def atom(
-    request: Request,
-    feed_id: str,
-    limit: int = Query(10, ge=1, le=30),
-    offset: int = Query(0, ge=0),
-    is_update:bool=False
-):
-    return await get_mp_articles_source(request=request,feed_id=feed_id, limit=limit,offset=offset, is_update=is_update,ext="json")
-@feed_router.get("/{feed_id}.rss", summary="获取公众号文章Rss")
+@feed_router.get("/{feed_id}.{ext}", summary="获取公众号文章源")
 async def rss(
     request: Request,
     feed_id: str,
-    limit: int = Query(10, ge=1, le=30),
+    ext: str,
+    limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    is_update:bool=False
+    is_update:bool=True
 ):
-    return await get_mp_articles_source(request=request,feed_id=feed_id, limit=limit,offset=offset, is_update=is_update,ext="rss")
-
+    return await get_mp_articles_source(request=request,feed_id=feed_id, limit=limit,offset=offset, is_update=is_update,ext=ext)

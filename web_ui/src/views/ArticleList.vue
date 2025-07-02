@@ -50,15 +50,18 @@
               <template #icon><icon-scan /></template>
               刷新授权
             </a-button>
-            <a-select v-model="rssFormat" style="width: 120px" placeholder="选择格式">
-              <a-option value="rss">RSS</a-option>
-              <a-option value="atom">ATOM</a-option>
-              <a-option value="json">JSON</a-option>
-            </a-select>
-            <a-button @click="openRssFeed">
-              <template #icon><IconWifi /></template>
-              订阅
-            </a-button>
+            <a-dropdown>
+              <a-button>
+                <template #icon><IconWifi /></template>
+                订阅
+                <icon-down />
+              </a-button>
+              <template #content>
+                <a-doption @click="rssFormat='atom'; openRssFeed()">ATOM</a-doption>
+                <a-doption @click="rssFormat='rss'; openRssFeed()">RSS</a-doption>
+                <a-doption @click="rssFormat='json'; openRssFeed()">JSON</a-doption>
+              </template>
+            </a-dropdown>
             <a-button type="primary" status="danger" @click="handleBatchDelete" :disabled="!selectedRowKeys.length">
               <template #icon><icon-delete /></template>
               批量删除
@@ -249,7 +252,7 @@ const handleMpPageChange = (page: number, pageSize: number) => {
   mpPagination.value.pageSize = pageSize
   fetchMpList()
 }
-const rssFormat = ref('rss')
+const rssFormat = ref('atom')
 const activeFeed=ref()
 const handleMpClick = (mpId: string) => {
   activeMpId.value = mpId
@@ -316,10 +319,10 @@ const wechatAuthQrcodeRef = ref()
 const openRssFeed = () => {
   const format = ['rss', 'atom', 'json'].includes(rssFormat.value) 
     ? rssFormat.value 
-    : 'rss'
+    : 'atom'
   
   if (!activeMpId.value) {
-    window.open(`/rss`, '_blank')
+    window.open(`/feed/all.${format}`, '_blank')
     return
   }
   const activeMp = mpList.value.find(item => item.id === activeMpId.value)

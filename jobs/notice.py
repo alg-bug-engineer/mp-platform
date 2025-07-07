@@ -1,5 +1,6 @@
 
 from core.config import cfg
+from driver.success import Success
 import time
 def sys_notice(text:str="",title:str=""):
     from core.notice import notice
@@ -16,7 +17,7 @@ def sys_notice(text:str="",title:str=""):
 
 from driver.wx import WX_API
 def send_wx_code(title:str="",url:str=""):
-    WX_API.GetCode(Notice=CallBackNotice)
+    WX_API.GetCode(Notice=CallBackNotice,CallBack=Success)
     pass
 def CallBackNotice():
         url=WX_API.QRcode()['code']

@@ -145,18 +145,29 @@ API服务启动后，访问以下地址查看文档：
 | `DINGDING_WEBHOOK`       | 钉钉机器人Webhook地址                                                          | -                           |
 | `WECHAT_WEBHOOK`         | 微信机器人Webhook地址                                                          | -                           |
 | `FEISHU_WEBHOOK`         | 飞书机器人Webhook地址                                                          | -                           |
-| `MODEL`                  | 采集方式：web 或 api                                                          | web                         |
+| `USER_AGENT`             | 用户代理字符串                                                                | Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 |
 | `PORT`                   | API服务端口                                                                   | 8001                        |
 | `DEBUG`                  | 调试模式                                                                      | False                       |
 | `MAX_PAGE`               | 第一次添加时采集的最大页数                                                      | 5                           |
 | `RSS_BASE_URL`           | RSS域名地址                                                                   | ""                          |
-| `RSS_LOCAL`              | 是否为本地RSS链接                                                             | False                        |
+| `RSS_LOCAL`              | 是否为本地RSS链接                                                             | False                       |
+| `RSS_TITLE`              | RSS标题                                                                      | ""                          |
+| `RSS_DESCRIPTION`        | RSS描述                                                                      | ""                          |
+| `RSS_COVER`              | RSS封面图片URL                                                               | ""                          |
+| `RSS_ADD_COVER`          | 是否添加封面图片                                                              | True                        |
+| `RSS_CDATA`              | RSS正文是否启用CDATA                                                          | False                       |
+| `RSS_PAGE_SIZE`          | RSS分页大小                                                                  | 10                          |
+| `RSS_FULL_CONTEXT`       | 是否显示全文                                                                  | False                       |
 | `TOKEN_EXPIRE_MINUTES`   | 登录会话有效时长(分钟)                                                         | 60                          |
+| `CACHE.DIR`              | 缓存目录路径                                                                  | ./data/cache                |
+| `ARTICLE.TRUE_DELETE`    | 是否真实删除文章(False为逻辑删除)                                              | False                       |
 | `GATHER.CONTENT`         | 是否采集内容                                                                  | True                        |
 | `GATHER.MODEL`           | 采集模式(web模式可采集发布链接，api模式可采集临时链接)                           | web                         |
+| `GATHER.CONTENT_AUTO_CHECK` | 是否自动检查未采集文章内容                                                   | False                       |
+| `GATHER.CONTENT_AUTO_INTERVAL` | 自动检查未采集文章内容的时间间隔(分钟)                                      | 59                          |
+| `SAFE_HIDE_CONFIG`       | 需要隐藏的配置信息(逗号分隔)                                                   | db,secret,token,notice.wechat,notice.feishu,notice.dingding |
 | `LOG_FILE`               | 日志文件路径，默认为空字符串，表示不输出到文件。如果要输出到文件，可以指定一个路径如：/var/log/we-mp-rss.log | -                           |
 | `LOG_LEVEL`              | 日志级别(DEBUG, INFO, WARNING, ERROR, CRITICAL)                              | INFO                        |
-| `RSS_FULL_CONTEXT`       | 是否显示全文                                                                | False                       |
 
 
 # 云端部署
@@ -170,8 +181,8 @@ docker run -d \
   --name we-mp-rss \
   -p 8001:8001 \
   -e DB=sqlite:///data/db.db \
-  -e USERNAME:admin \
-  -e PASSWORD:admin@123 \
+  -e USERNAME=admin \
+  -e PASSWORD=admin@123 \
   -e DINGDING_WEBHOOK=https://oapi.dingtalk.com/robot/send?access_token=xxx \
   -v $(pwd)/data:/app/data \
   ghcr.io/rachelos/we-mp-rss:latest
@@ -200,8 +211,8 @@ docker run -d \
   --name we-mp-rss \
   -p 8001:8001 \
   -e DB=mysql+pymysql://<username>:<password>@<host>/<database>?charset=utf8mb4 \
-  -e USERNAME:admin \
-  -e PASSWORD:admin@123 \
+  -e USERNAME=admin \
+  -e PASSWORD=admin@123 \
   -e DINGDING_WEBHOOK=https://oapi.dingtalk.com/robot/send?access_token=xxx \
   -v $(pwd)/data:/app/data \
   ghcr.io/rachelos/we-mp-rss:latest
@@ -277,7 +288,6 @@ QQ:244538330
 [WeWe RSS](https://github.com/cooderl/wewe-rss)
 [橙单-高质量低代码平台](https://gitee.com/orangeform/orange-admin)
 [orange-flowable](https://gitee.com/orangeform/orange-flowable)
-
 
 
 ## 许可证

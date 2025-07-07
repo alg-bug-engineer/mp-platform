@@ -111,12 +111,21 @@ class ConfigManager:
         if config is None:
             config = self._load_config()
         config_list = []
+        from core.config import cfg
+        keys=cfg.get("safe.hide_config","db").split(",")
+        print(keys)
         try:
             for key, value in config.items():
+                if key in keys:
+                    value="***"
+                    pass
                 if isinstance(value, dict):
                     # 处理嵌套配置
                     for sub_key, sub_value in value.items():
                         config_key = f"{key}.{sub_key}"
+                        if config_key in keys:
+                            sub_value="***"
+                            pass
                         config_list.append(ConfigManagement(
                             config_key=config_key,
                             config_value=str(sub_value) if sub_value is not None else '',

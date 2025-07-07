@@ -36,7 +36,7 @@
       </a-card>
     </a-layout-sider>
 
-    <a-layout-content :style="{ padding: '20px' }">
+    <a-layout-content :style="{ padding: '20px', width: '100%' }" >
       <a-page-header 
       :title="activeFeed ? activeFeed.name : '全部'" 
       :subtitle="activeFeed ? '管理 ' + activeFeed.name + ' 的内容' : '管理您的公众号订阅内容'" :show-back="false">
@@ -91,7 +91,7 @@
           <a-input-search v-model="searchText" placeholder="搜索文章标题" @search="handleSearch" @keyup.enter="handleSearch" allow-clear />
         </div>
 
-        <a-table :columns="columns" :data="articles" :loading="loading" :pagination="pagination"
+        <a-table :columns="columns" :data="articles" :loading="loading" :pagination="pagination" style="width: 100%"
           @page-change="handlePageChange"  row-key="id"
           :row-selection="{
             type: 'checkbox',
@@ -193,10 +193,11 @@ const columns = [
   {
     title: '文章标题',
     dataIndex: 'title',
-    width: '70%',
+    width: '60%',
     ellipsis: true,
     render: ({ record }) => h('a', {
       href: record.url || '#',
+      title: record.title,
       target: '_blank',
       style: { color: 'var(--color-text-1)' }
     }, record.title)
@@ -204,7 +205,7 @@ const columns = [
   {
     title: '公众号',
     dataIndex: 'mp_id',
-    width: '10%',
+    width: '8%',
     ellipsis: true,
     render: ({ record }) => {
       const mp = mpList.value.find(item => item.id === record.mp_id);
@@ -216,7 +217,7 @@ const columns = [
   {
     title: '更新时间',
     dataIndex: 'created_at',
-    width: '10%',
+    width: '8%',
     render: ({ record }) => h('span',
       { style: { color: 'var(--color-text-3)', fontSize: '12px' } },
       formatDateTime(record.created_at)
@@ -225,14 +226,14 @@ const columns = [
   {
     title: '发布时间',
     dataIndex: 'publish_time',
-    width: '10%',
+    width: '8%',
     render: ({ record }) => h('span',
       { style: { color: 'var(--color-text-3)', fontSize: '12px' } },
       formatTimestamp(record.publish_time)
     )
   },
   {
-    title: '是否有正文',
+    title: '正文',
     width: '8%',
     render: ({ record }) => h('span', 
       { style: { color: 'var(--color-text-3)', fontSize: '12px' } },
@@ -242,7 +243,6 @@ const columns = [
   {
     title: '操作',
     dataIndex: 'actions',
-    width: '120px',
     slotName: 'actions'
   }
 ]

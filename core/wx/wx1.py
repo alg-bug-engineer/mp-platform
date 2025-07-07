@@ -53,7 +53,7 @@ class MpsApi(WxGather):
         count=5
         params = {
             "action": "list_ex",
-            "begin": begin,
+            "begin": start_page,
             "count": count,
             "fakeid": faker_id,
             "type": "9",

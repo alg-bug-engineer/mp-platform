@@ -54,7 +54,7 @@ class MpsWeb(WxGather):
         params = {
         "sub": "list",
         "sub_action": "list_ex",
-        "begin": 0,
+        "begin":start_page,
         "count": count,
         "fakeid": faker_id,
         "token": self.token,

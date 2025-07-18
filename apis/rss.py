@@ -251,9 +251,11 @@ async def get_mp_articles_source(
             media_type=rss.get_type()
         )
     except Exception as e:
-        print(f"获取公众号文章RSS错误:",e)
+        print(f"获取RSS错误:")
+        print(e)
         return Response(
-            content=str(e),
+             content=rss_xml,
+             media_type=rss.get_type()
         )
     
 

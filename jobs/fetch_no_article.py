@@ -30,7 +30,7 @@ def fetch_articles_without_content():
             
             # 获取内容
             if cfg.get("gather.content_mode","web"):
-                content=Web.get_article_content(url)
+                content=Web.get_article_content(url).get("content")
             else:
                 content = ga.content_extract(url)
             sleep(random.randint(3,10))

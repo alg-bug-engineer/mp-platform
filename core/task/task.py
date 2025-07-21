@@ -86,15 +86,21 @@ class TaskScheduler:
                 
                 # 处理随机时间范围
                 def parse_random_field(field: str, field_name: str):
-                    if '~' in field:
-                        try:
-                            min_val, max_val = map(int, field.split('~'))
-                            if min_val > max_val:
-                                raise ValueError(f"Invalid {field_name} range: {field}")
-                            return lambda: str(random.randint(min_val, max_val))
-                        except ValueError as e:
-                            raise ValueError(f"Invalid {field_name} format: {field}") from e
+                    # 假设我们要解析的格式是 "*/1~3" 或 "1~3-3~10"
+                    import re
+                    try:
+                        # 使用正则表达式匹配格式
+                        pattern = r'(\d+)\~(\d+)'
+                        match = re.findall(pattern, field)
+                        if match:
+                            # 提取匹配的组
+                            start, end =match[0]
+                            step=random.randint(int(start),int(end))
+                            field=field.replace(f"{start}~{end}",str(step))
+                    except:
+                        pass
                     return field
+
                 
                 second = parse_random_field(second, 'second')
                 minute = parse_random_field(minute, 'minute')

@@ -94,6 +94,7 @@ defineExpose({
           <a-option v-for="m in 60" :key="m-1" :value="(m-1).toString()">{{ m-1 }}</a-option>
           <a-option value="*">*</a-option>
           <a-option value="*/5">每5分钟</a-option>
+          <a-option value="*/1~59">每1-59分钟(随机)</a-option>
           <a-option value="*/15">每15分钟</a-option>
           <a-option value="*/30">每30分钟</a-option>
           <a-option value="0-30">0-30分钟</a-option>
@@ -107,8 +108,8 @@ defineExpose({
           <a-option value="*/1">每1小时</a-option>
           <a-option value="*/2">每2小时</a-option>
           <a-option value="*/3">每3小时</a-option>
-          <a-option value="*/4">每3小时</a-option>
-          <a-option value="*/5">每3小时</a-option>
+          <a-option value="*/4">每4小时</a-option>
+          <a-option value="*/5">每5小时</a-option>
           <a-option value="*/8">每8小时</a-option>
           <a-option value="*/6">每6小时</a-option>
           <a-option value="*/12">每12小时</a-option>

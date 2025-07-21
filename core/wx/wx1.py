@@ -16,8 +16,6 @@ class MpsApi(WxGather):
         try:
             text = super().content_extract(url)
             if text is not None:
-                if "当前环境异常，完成验证后即可继续访问" in text:
-                    print_error("当前环境异常，完成验证后即可继续访问")
                 soup = BeautifulSoup(text, 'html.parser')
                 # 找到内容
                 js_content_div = soup.find('div', {'id': 'js_content'})

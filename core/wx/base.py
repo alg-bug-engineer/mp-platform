@@ -99,6 +99,9 @@ class WxGather:
             r = session.get(url, headers=headers)
             if r.status_code == 200:
                 text = r.text
+                if "当前环境异常，完成验证后即可继续访问" in text:
+                    print_error("当前环境异常，完成验证后即可继续访问")
+                    text=""
         except:
             pass
         return text

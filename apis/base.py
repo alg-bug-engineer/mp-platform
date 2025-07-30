@@ -22,6 +22,9 @@ def error_response(code: int, message: str, data=None):
         "message": message,
         "data": data
     }
+from sqlalchemy import and_,or_
+from core.models import Article
 def format_search_kw(keyword: str):
-    kw=keyword.strip().replace(" ","|").replace("|", "%")
-    return kw
+    words = keyword.replace("-"," ").replace("|"," ").split(" ")
+    rule = or_(*[Article.title.ilike(f"%{w}%") for w in words])
+    return rule

@@ -219,7 +219,7 @@ async def get_mp_articles_source(
         total = query.count()
         # articles = query.order_by(Article.publish_time.desc()).limit(limit).offset(offset).all()
         if kw!="":
-            query=query.filter(Article.title.like(f"%{format_search_kw(kw)}%"))
+            query=query.filter(format_search_kw(kw))
         articles =query.order_by(Article.publish_time.desc()).limit(limit).offset(offset).all()
         # 转换为RSS格式数据
         import datetime

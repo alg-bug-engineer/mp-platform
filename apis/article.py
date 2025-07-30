@@ -68,9 +68,7 @@ async def get_articles(
             query = query.filter(Article.mp_id == mp_id)
         if search:
             query = query.filter(
-                or_(
-                    Article.title.ilike(f"%{format_search_kw(search)}%"),
-                )
+               format_search_kw(search)
             )
         
         # 获取总数

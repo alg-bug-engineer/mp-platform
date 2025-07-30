@@ -8,6 +8,8 @@ server:
    send_code: ${SEND_CODE:-True}
    #二维通知标题
    code_title: ${CODE_TITLE:-WeRSS授权二维码}
+   #启动JOB定时任务，默认为True
+   enable_job: ${ENABLE_JOB:-True}
 
 #数据库连接 例如db:  mysql+pymysql://<username>:<password>@<host>/we-rss?charset=utf8mb4
 #需要注意数据库连接字符串的格式，如果是sqlite数据库，则使用sqlite:///路径的形式，如果是mysql数据库，

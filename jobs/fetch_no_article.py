@@ -13,7 +13,8 @@ def fetch_articles_without_content():
     ga=WxGather().Model()
     try:
         # 查询content为空的文章
-        articles = session.query(Article).filter(Article.content == None).limit(10).all()
+        from sqlalchemy import or_
+        articles = session.query(Article).filter(or_(Article.content.is_(None), Article.content == "")).limit(10).all()
         
         if not articles:
             print_warning("暂无需要获取内容的文章")
@@ -53,6 +54,7 @@ from core.task import TaskScheduler
 from core.queue import TaskQueueManager
 scheduler=TaskScheduler()
 task_queue=TaskQueueManager()
+task_queue.run_task_background()
 from core.config import cfg
 from core.print import print_success,print_warning
 def start_sync_content():
@@ -61,8 +63,8 @@ def start_sync_content():
         return
     interval=int(cfg.get("gather.content_auto_interval",1)) # 每隔多少分钟
     cron_exp=f"*/{interval} * * * *"
-    scheduler.clear_all_jobs()
     task_queue.clear_queue()
+    scheduler.clear_all_jobs()
     def do_sync():
         task_queue.add_task(fetch_articles_without_content)
     job_id=scheduler.add_cron_job(do_sync,cron_expr=cron_exp)

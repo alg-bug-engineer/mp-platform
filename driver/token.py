@@ -7,6 +7,7 @@ if not os.path.exists(lic_path):
     with open(lic_path, "w") as f:
         f.write("{}")
 wx_cfg = Config(lic_path)
+
 def set_token(data:any):
     """
     设置微信登录的Token和Cookie信息
@@ -17,6 +18,8 @@ def set_token(data:any):
     wx_cfg.set("expiry", data.get("expiry", {}))
     wx_cfg.save_config()
     wx_cfg.reload()
+    from jobs.notice import sys_notice
+    sys_notice(f"WeRss授权成功", cfg.get("server.code_title","WeRss授权成功"))
     # cfg.set("token", data.get("token", ""))
     # cfg.save_config()
 def get(key:str,default:any=None):

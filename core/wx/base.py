@@ -201,7 +201,7 @@ class WxGather:
     def Error(self,error:str,code=None):
         self.Over()
         if code=="Invalid Session":
-            from jobs.notice import send_wx_code
+            from jobs.failauth import send_wx_code
             WX_LOGIN_ED=False
             send_wx_code(f"公众号平台登录失效,请重新登录")
             pass

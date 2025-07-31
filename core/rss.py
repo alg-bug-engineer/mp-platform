@@ -186,7 +186,7 @@ class RSS:
             
             if full_context:
                 type=self.get_content_type()
-                content = ET.SubElement(entry, "content", type=f"{type}") 
+                content = ET.SubElement(entry, "content", type="html") 
                 content.text = format_content(rss_item["content"],type)
         # 生成XML字符串
         tree_str = '<?xml version="1.0" encoding="utf-8"?>\r\n' + \

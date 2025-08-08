@@ -89,9 +89,10 @@
     :fullscreen="false"
   >
     <div style="padding: 20px; overflow-y: auto;clear:both;">
-      <div><h2>{{currentArticle.title}}</h2></div>
+      <div><h2 id="topreader">{{currentArticle.title}}</h2></div>
         <div style="margin-top: 20px; color: var(--color-text-3); text-align: left;position:fixed;left:40%;top:-3px;">
         <a-link @click="viewArticle(currentArticle,-1)" target="_blank">上一篇 </a-link>
+        <a-space/>
         <a-link @click="viewArticle(currentArticle,1)" target="_blank">下一篇 </a-link>
        </div>
        <div style="margin-top: 20px; color: var(--color-text-3); text-align: left">
@@ -218,6 +219,7 @@ const viewArticle = async (record: any,action_type: number) => {
       url: article.url
     }
     articleModalVisible.value = true
+    window.location="#topreader"
   } catch (error) {
     console.error('获取文章详情错误:', error)
     Message.error(error)

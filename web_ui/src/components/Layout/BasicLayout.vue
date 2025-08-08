@@ -18,5 +18,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, provide } from 'vue'
 import Navbar from './Navbar.vue'
-const appTitle = computed(() => import.meta.env.VITE_APP_COPYRIGHT || 'Power By Rachel Design')
+const appTitle = computed(() => {
+  const fingerprint = window.navigator.userAgent;
+  const ip = window.location.hostname;
+  return `${import.meta.env.VITE_APP_COPYRIGHT || 'Power By Rachel Design'} | ${fingerprint} | ${ip}`;
+})
 </script>

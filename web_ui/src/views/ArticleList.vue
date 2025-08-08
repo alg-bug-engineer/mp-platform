@@ -23,7 +23,7 @@ onBeforeUnmount(() => {
 </script>
 <style>
 #article-modal img{
-   max-width:100%;
+   max-width:100% !important;
    border-width:0 !important;
 }
 </style>

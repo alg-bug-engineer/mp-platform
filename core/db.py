@@ -178,12 +178,21 @@ class Db:
             _session()
         
         session = self.Session()
-        session.expire_all()
-        session.expire_on_commit = True  # 确保每次提交后对象过期
+        # session.expire_all()
+        # session.expire_on_commit = True  # 确保每次提交后对象过期
         # 检查会话是否已经关闭
         if not session.is_active:
             from core.print import print_info
             print_info(f"[{self.tag}] Session is already closed.")
+            _session()
+            return self.Session()
+        # 检查数据库连接是否已断开
+        try:
+            session.execute("SELECT 1")
+        except Exception as e:
+            from core.print import print_warning
+            print_warning(f"[{self.tag}] Database connection lost: {e}. Reconnecting...")
+            self.init(self.connection_str)
             _session()
             return self.Session()
         return session

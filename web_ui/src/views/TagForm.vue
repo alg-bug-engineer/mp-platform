@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getTag, createTag, updateTag } from '@/api/tagManagement'
 import type { Tag, TagCreate } from '@/types/tagManagement'
 import { Message } from '@arco-design/web-vue'
-import { uploadCover } from '@/api/tagManagement'
+import { uploadFile } from '@/api/file'
 import MpMultiSelect from '@/components/MpMultiSelect.vue'
 
 const route = useRoute()
@@ -62,8 +62,9 @@ const handleUploadChange = async (options: any) => {
   }
 
   try {
-    const res = await uploadCover(file)
-    formModel.value.cover = res.avatar
+    const res = await uploadFile(file)
+    console.log(res)
+    formModel.value.cover = res.url
   } catch (error) {
     console.error('上传错误:', error)
     Message.error(`上传失败: ${error.response?.data?.message || error.message || '服务器错误'}`)

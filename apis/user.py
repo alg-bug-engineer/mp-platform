@@ -303,7 +303,6 @@ async def change_password(
             status_code=status.HTTP_406_NOT_ACCEPTABLE,
             detail=f"密码修改失败: {str(e)}"
         )
-import typing
 @router.post("/avatar", summary="上传用户头像")
 async def upload_avatar(
     file: UploadFile = File(...),
@@ -343,4 +342,42 @@ async def upload_avatar(
         raise HTTPException(
             status_code=status.HTTP_406_NOT_ACCEPTABLE,
             detail=f"头像上传失败: {str(e)}"
+        )
+@router.post("/upload", summary="上传文件")
+async def upload_file(
+    file: UploadFile = File(...),
+    type: str = "tags",
+    current_user: dict = Depends(get_current_user)
+):
+    """处理用户文件上传"""
+    try:
+        # 验证 type 参数的安全性
+        if not type.isalnum() or type in ["", ".."]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_response(
+                    code=40003,
+                    message="无效的文件类型"
+                )
+            )
+        file_url_path=f"files/{type}/"
+        from core.res.avatar import files_dir
+        upload_path = f"{files_dir}/{type}/"
+        # 确保上传目录存在
+        os.makedirs(upload_path, exist_ok=True)
+
+        # 生成唯一的文件名
+        file_name = f"{current_user['username']}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}"
+        file_path = f"{upload_path}/{file_name}"
+
+        # 保存文件
+        with open(file_path, "wb") as buffer:
+            buffer.write(await file.read())
+        return success_response(data={"url": f"/{file_url_path}/{file_name}"})
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_406_NOT_ACCEPTABLE,
+            detail=f"文件上传失败: {str(e)}"
         )

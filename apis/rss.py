@@ -214,7 +214,8 @@ async def get_mp_articles_source(
                     query=query.filter(Feed.id.in_(mps_ids))
                     feed.mp_name = tags.name
                     feed.mp_intro = tags.intro
-                    feed.mp_cover = tags.cover
+                    feed.mp_cover = f'{rss_domain}{tags.cover}'
+
         
         if not feed:
             raise HTTPException(

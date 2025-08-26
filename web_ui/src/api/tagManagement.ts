@@ -25,12 +25,3 @@ export const updateTag = (id: string, data: TagCreate) => {
 export const deleteTag = (id: string) => {
   return http.delete(`/wx/tags/${id}`)
 }
-export const uploadCover = (file: File) => {
-  const formData = new FormData()
-  formData.append('file', file)
-  return http.post<{code: number, url: string}>('/wx/user/avatar', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  })
-}

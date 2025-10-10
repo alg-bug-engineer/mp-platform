@@ -4,10 +4,10 @@ from sqlalchemy import inspect
 from sqlalchemy.exc import SQLAlchemyError
 from core.config import cfg
 
-if cfg.get("db","sqlite").startswith("sqlite"):
-    from sqlalchemy import Text
-else:
+if cfg.get("db","mysql").startswith("mysql"):
     from sqlalchemy.dialects.mysql import MEDIUMTEXT as Text
+else:
+    from sqlalchemy import Text
 
 class DataStatus():
     DELETED:int = 1000

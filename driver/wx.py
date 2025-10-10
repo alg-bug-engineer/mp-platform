@@ -11,7 +11,7 @@ import os
 from driver.success import getStatus
 from driver.store import Store
 import re
-from threading import Timer
+from threading import Timer, Lock
 from .cookies import expire
 import json
 from core.print import print_error,print_warning,print_info,print_success
@@ -26,6 +26,8 @@ class Wx:
     lock_file_path="data/.lock"
     CallBack=None
     Notice=None
+    # 添加线程锁保护共享变量
+    _login_lock = Lock()
     def __init__(self):
         self.lock_path=os.path.dirname(self.lock_file_path)
         self.refresh_interval=3660*24
@@ -116,7 +118,10 @@ class Wx:
     def schedule_refresh(self):
         if self.refresh_interval <= 0:
             return
-        if self.HasLogin:
+        is_logged_in = False
+        with self._login_lock:
+            is_logged_in = self.HasLogin
+        if is_logged_in:
             try:
                 self.refresh_task()
                 Timer(self.refresh_interval, self.schedule_refresh).start()
@@ -175,7 +180,8 @@ class Wx:
             if  self.check_lock():
                 return "微信公众平台登录脚本正在运行，请勿重复运行！"
             self.set_lock()
-            self.HasLogin=False
+            with self._login_lock:
+                self.HasLogin=False
             self.Clean()
             self.Close()
             # 初始化浏览器控制器
@@ -232,7 +238,8 @@ class Wx:
             wait.until(EC.url_contains(self.WX_HOME))
             print("登录成功，正在获取cookie和token...")
             from .success import setStatus
-            self.HasLogin=True
+            with self._login_lock:
+                self.HasLogin=True
             setStatus(True)
             time.sleep(3)
             self.CallBack=CallBack
@@ -307,7 +314,8 @@ class Wx:
         cookies = self.controller.driver.get_cookies()
         # print("\n获取到的Cookie:")
         self.SESSION=self.format_token(cookies,token)
-        self.HasLogin=False if self.SESSION["expiry"] is None else True
+        with self._login_lock:
+            self.HasLogin=False if self.SESSION["expiry"] is None else True
         self.Clean()
         if  self.HasLogin:
             print_success("登录成功！")

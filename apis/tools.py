@@ -176,28 +176,31 @@ async def list_export_files(
     """
     try:
         from .ver import API_VERSION
-        safe_root = os.path.normpath("./data/docs")
+        safe_root = os.path.abspath(os.path.normpath("./data/docs"))
         # Ensure mp_id is not None or empty
-        if not mp_id or not isinstance(mp_id, str):
-            return success_response([])
-        export_path = os.path.normpath(os.path.join(safe_root, mp_id))
+       
+        export_path = os.path.abspath(os.path.join(safe_root, mp_id))
         # Validate that export_path is within safe_root
         if not export_path.startswith(safe_root):
             return success_response([])
         if not os.path.exists(export_path):
             return success_response([])
+        # Check directory permissions
+        if not os.access(export_path, os.R_OK):
+            return error_response(403, "无权限访问该目录")
         files = []
         for root, _, filenames in os.walk(export_path):
             # Ensure root is also within safe_root, in case of symlinks or traversal
-            root_norm = os.path.normpath(root)
+            root_norm = os.path.abspath(root)
             if not root_norm.startswith(safe_root):
                 continue
             for filename in filenames:
                 if filename.endswith('.zip'):
                     file_path = os.path.join(root, filename)
-                    file_stat = os.stat(file_path)
-                    file_path = file_path.replace(export_path, "")
-                    files.append({
+                    try:
+                        file_stat = os.stat(file_path)
+                        file_path = os.path.relpath(file_path, export_path)
+                        files.append({
                         "filename": filename,
                         "size": file_stat.st_size,
                         "created_time": datetime.fromtimestamp(file_stat.st_ctime).isoformat(),
@@ -205,6 +208,9 @@ async def list_export_files(
                         "path": file_path,
                         "download_url": f"{API_VERSION}/tools/export/download?mp_id={mp_id}&filename={file_path}"  # 下载链接
                     })
+                    except PermissionError:
+                        continue
+               
         
         # 按修改时间倒序排列
         files.sort(key=lambda x: x["modified_time"], reverse=True)

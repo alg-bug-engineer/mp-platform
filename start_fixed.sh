@@ -1,1 +1,0 @@
-#!/bin/bashcd /app/bash install.shpython3 init_sys.pypython3 main.py -job True -init True# 执行一些操�?..while true; do  sleep 10done

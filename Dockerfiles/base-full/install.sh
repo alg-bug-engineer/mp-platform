@@ -68,7 +68,7 @@ source /app/environment.sh
 echo "source /app/environment.sh
 source $plant/bin/activate">/etc/profile
 # pip3 install --upgrade pip
-
+pip3 install playwright
 # 检查requirements.txt更新
 if [ -f "requirements.txt" ]; then
     CURRENT_MD5=$(md5sum requirements.txt | cut -d' ' -f1)

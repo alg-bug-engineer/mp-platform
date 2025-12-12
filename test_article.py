@@ -155,7 +155,7 @@ if __name__=="__main__":
     # testWeb()
     # testNotice()
     # testMd2Doc()
-    # testLogin()
-    testCheckAuth()
+    testLogin()
+    # testCheckAuth()
     # testToken()  # 注释掉避免线程冲突
     # testMarkDown()

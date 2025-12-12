@@ -18,7 +18,7 @@ from .cookies import expire
 import json
 from core.print import print_error,print_warning,print_info,print_success
 class Wx:
-    HasLogin=False
+    _haslogin=False
     SESSION=None
     HasCode=False
     isLOCK=False
@@ -134,8 +134,10 @@ class Wx:
                                 random_index = random.randint(0, account_count - 1)
                                 time.sleep(1)
                                 p=accounts.nth(random_index).locator("p")
-                                account_name=p.text_content()
-                                print(f"切换账号: {account_name}")
+                                nick_name=accounts.nth(random_index).locator(".section-item__nickname")
+                                account_id=p.text_content()
+                                account_name=nick_name.text_content()
+                                print(f"账号: {account_name} ID:{account_id}")
                                 p.click()
                                 # 等待页面加载并验证切换成功
                                 page.wait_for_load_state("networkidle", timeout=10000)
@@ -146,7 +148,7 @@ class Wx:
                                 print_success("账号切换成功")
                                 from jobs.notice import sys_notice
                                 from core.config import cfg
-                                sys_notice(f"账号切换成功\n- 账号名称: {account_name}", str(cfg.get("server.code_title","WeRss账号切换成功")))
+                                sys_notice(f"账号切换成功\n- 账号名称: {account_name} \n- 账号ID: {account_id} \n- 过期时间: {self.SESSION.get('expire_time')}", str(cfg.get("server.code_title","WeRss账号切换成功")))
                                 return True
                             else:
                                 print_warning("没有找到可切换的账号")

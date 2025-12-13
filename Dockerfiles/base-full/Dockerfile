@@ -10,6 +10,7 @@ FROM werss-base
 # 安装系统依赖
 WORKDIR /app
 # 复制后端代码
+COPY ./requirements.txt ./requirements.txt
 COPY ./install.sh  ./install.sh
 ENV INSTALL=True BROWSER_TYPE=webkit PLANT_PATH=/app/env/
 RUN chmod +x ./install.sh

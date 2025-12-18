@@ -10,6 +10,7 @@ from core.print import print_error,print_info, print_warning
 from core.rss import RSS
 from driver.success import setStatus
 from driver.wxarticle import Web
+from core.wait import Wait
 import random
 # 定义一些常见的 User-Agent
 USER_AGENTS = [
@@ -111,7 +112,7 @@ class WxGather:
                 text = r.text
                 text=self.remove_common_html_elements(text)
                 if "当前环境异常，完成验证后即可继续访问" in text:
-                    self.Wait(tips="当前环境异常，完成验证后即可继续访问")
+                    Wait(tips="当前环境异常，完成验证后即可继续访问")
                     text=""
         except:
             pass
@@ -142,7 +143,7 @@ class WxGather:
                     art["ext"]=Ext_Data
                     # art.pop("content")
                     self.articles.append(art)
-
+                Wait(min=1,max=5,tips=f"获取 {data['title']}...")
 
     #通过公众号码平台接口查询公众号
     def search_Biz(self,kw:str="",limit=10,offset=0):
@@ -207,7 +208,7 @@ class WxGather:
         _cookies.append({'name':'token','value':self.token})
         if CallBack is not None:
             CallBack(item)
-        self.Wait(tips=f"{item['title']} 处理完成",min=3,max=10)
+        self.Wait(tips=f"{item['mps_title']} 处理完成",min=3,max=10)
         pass
     def Error(self,error:str,code=None):
         self.Over()

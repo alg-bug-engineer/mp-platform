@@ -1,5 +1,6 @@
 from core.models.article import Article,DATA_STATUS
 import core.db as db
+from core.wait import Wait
 from core.wx.base import WxGather
 from time import sleep
 from core.print import print_success,print_error
@@ -35,7 +36,6 @@ def fetch_articles_without_content():
                 content=Web.get_article_content(url).get("content")
             else:
                 content = ga.content_extract(url)
-            sleep(random.randint(3,10))
             if content:
                 # 更新内容
                 article.content = content
@@ -46,7 +46,7 @@ def fetch_articles_without_content():
                 print_success(f"成功更新文章 {article.title} 的内容")
             else:
                 print_error(f"获取文章 {article.title} 内容失败")
-                
+            Wait(min=5,max=10,tips=f"修正 {article.title}... 完成")   
     except Exception as e:
         print(f"处理过程中发生错误: {e}")
     finally:

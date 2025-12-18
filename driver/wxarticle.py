@@ -4,6 +4,7 @@ from .playwright_driver import PlaywrightController
 from typing import Dict
 from core.print import print_error,print_info,print_success,print_warning
 import time
+import core.wait as Wait
 import base64
 import re
 import os
@@ -202,7 +203,7 @@ class WXArticleFetcher:
                     article_data['content'] = content_backup
                     
                     # 避免请求过快，但只在非最后一个请求时等待
-                    self.Wait(3,10,tips=f"处理第 {i}/{total_count} 篇文章")
+                    Wait(1,2,tips=f"处理第 {i}/{total_count} 篇文章")
                         
                 except Exception as e:
                     print_error(f"处理文章失败 {url}: {e}")
@@ -223,10 +224,6 @@ class WXArticleFetcher:
         with ThreadPoolExecutor() as pool:
             future = loop.run_in_executor(pool, self.get_article_content, url)
         return await future
-    def Wait(self,min=10,max=60,tips:str=""):
-        wait=random.randint(min,max)
-        print_warning(f"{tips}等待{wait}秒后重试...")
-        time.sleep(wait)
     def get_article_content(self, url: str) -> Dict:
         """获取单篇文章详细内容
         

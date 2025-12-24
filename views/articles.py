@@ -14,7 +14,7 @@ from apis.base import format_search_kw
 from core.lax.template_parser import TemplateParser
 from views.config import base
 from driver.wxarticle import Web
-from core.cache import cache_view, clear_cache_pattern
+from core.cache import cache_view, clear_cache_pattern, data_cache
 
 def _render_template_with_error(template_path: str, error_msg: str, breadcrumb: list) -> HTMLResponse:
     """渲染错误页面的辅助函数"""
@@ -45,7 +45,7 @@ router = APIRouter(tags=["文章"])
 async def articles_view(
     request: Request,
     page: int = Query(1, ge=1, description="页码"),
-    limit: int = Query(20, ge=1, le=100, description="每页数量"),
+    limit: int = Query(5, ge=1, le=20, description="每页数量"),
     mp_id: Optional[str] = Query(None, description="公众号ID筛选"),
     tag_id: Optional[str] = Query(None, description="标签ID筛选"),
     keyword: Optional[str] = Query(None, description="关键词搜索"),
@@ -57,36 +57,6 @@ async def articles_view(
     """
     session = DB.get_session()
     try:
-        # 构建查询 - 先筛选再join以提高性能
-        query = session.query(Article)
-        
-        # 基础筛选条件
-        query = query.filter(Article.status == 1)
-        
-        # 公众号筛选
-        if mp_id:
-            query = query.filter(Article.mp_id == mp_id)
-        
-        # 标签筛选
-        mps_ids = []
-        if tag_id:
-            tag = session.query(Tags).filter(Tags.id == tag_id, Tags.status == 1).first()
-            if tag and tag.mps_id:
-                try:
-                    mps_data = json.loads(tag.mps_id)
-                    mps_ids = [str(mp['id']) for mp in mps_data] if isinstance(mps_data, list) else []
-                except (json.JSONDecodeError, TypeError):
-                    mps_ids = []
-                
-                if mps_ids:
-                    query = query.filter(Article.mp_id.in_(mps_ids))
-        
-        # 关键词搜索
-        if keyword and keyword.strip():
-            search_filter = format_search_kw(keyword.strip())
-            if search_filter is not None:
-                query = query.filter(search_filter)
-        
         # 验证排序参数
         valid_sort_fields = {"publish_time", "created_at"}
         valid_orders = {"asc", "desc"}
@@ -96,32 +66,57 @@ async def articles_view(
         if order not in valid_orders:
             order = "desc"
         
-        # 排序
+        # 预处理标签筛选的mp_ids
+        mps_ids = []
+        if tag_id:
+            tag = session.query(Tags.mps_id).filter(Tags.id == tag_id, Tags.status == 1).scalar()
+            if tag:
+                try:
+                    mps_data = json.loads(tag)
+                    mps_ids = [str(mp['id']) for mp in mps_data] if isinstance(mps_data, list) else []
+                except (json.JSONDecodeError, TypeError):
+                    mps_ids = []
+        
+        # 构建基础查询条件
+        base_conditions = [Article.status == 1]
+        if mp_id:
+            base_conditions.append(Article.mp_id == mp_id)
+        if mps_ids:
+            base_conditions.append(Article.mp_id.in_(mps_ids))
+        if keyword and keyword.strip():
+            search_filter = format_search_kw(keyword.strip())
+            if search_filter is not None:
+                base_conditions.append(search_filter)
+        
+        # 使用单一查询获取文章和Feed信息
+        from sqlalchemy import and_
+        
+        # 构建排序
         if sort == "publish_time":
-            order_by = Article.publish_time.desc() if order == "desc" else Article.publish_time.asc()
-        elif sort == "created_at":
-            order_by = Article.created_at.desc() if order == "desc" else Article.created_at.asc()
-        else:
-            order_by = Article.publish_time.desc()
+            order_clause = Article.publish_time.desc() if order == "desc" else Article.publish_time.asc()
+        else:  # created_at
+            order_clause = Article.created_at.desc() if order == "desc" else Article.created_at.asc()
         
-        query = query.order_by(order_by)
+        # 主查询：一次性获取文章和Feed信息
+        query = session.query(Article, Feed).join(
+            Feed, Article.mp_id == Feed.id, isouter=True
+        ).filter(and_(*base_conditions)).order_by(order_clause)
         
-        # 查询总数（在join之前）
+        # 获取总数
         total = query.count()
         
-        # 分页
+        # 分页查询
         offset = (page - 1) * limit
         articles_data = query.offset(offset).limit(limit).all()
         
-        # 获取关联的Feed信息
-        mp_ids = [article.mp_id for article in articles_data]
-        feeds_dict = {feed.id: feed for feed in session.query(Feed).filter(Feed.id.in_(mp_ids)).all()} if mp_ids else {}
-        # 组装数据
-        articles = [(article, feeds_dict.get(article.mp_id)) for article in articles_data]
-        
         # 处理文章数据
         article_list = []
-        for article, feed in articles:
+        feed_dict = {}  # 用于后续筛选信息
+        
+        for article, feed in articles_data:
+            if feed:
+                feed_dict[feed.id] = feed
+            
             article_data = {
                 "id": article.id,
                 "title": article.title,
@@ -137,48 +132,50 @@ async def articles_view(
             }
             article_list.append(article_data)
         
-        # 获取筛选信息 - 合并查询提高性能
+        # 获取筛选信息
         filter_info = {}
-        if mp_id or tag_id:
-            if mp_id:
-                mp = session.query(Feed).filter(Feed.id == mp_id).first()
-                if mp:
-                    filter_info["mp"] = {"id": mp.id, "name": mp.mp_name}
+        if mp_id and mp_id in feed_dict:
+            feed = feed_dict[mp_id]
+            filter_info["mp"] = {"id": feed.id, "name": feed.mp_name}
+        
+        if tag_id:
+            tag = session.query(Tags.id, Tags.name).filter(Tags.id == tag_id).first()
+            if tag:
+                filter_info["tag"] = {"id": tag.id, "name": tag.name}
+        
+        # 获取标签和热门公众号信息（使用缓存）
+        from core.cache import data_cache
+        
+        # 尝试从缓存获取标签选项
+        cache_key_tags = "tag_options_all"
+        tag_options = data_cache.get(cache_key_tags)
+        if tag_options is None:
+            tags = session.query(Tags.id, Tags.name).filter(Tags.status == 1).order_by(Tags.name).all()
+            tag_options = [{"id": tag.id, "name": tag.name} for tag in tags]
+            data_cache.set(cache_key_tags, tag_options)  # 使用默认TTL（1小时）
+        
+        # 尝试从缓存获取热门公众号
+        cache_key_popular = "popular_mps_top10"
+        mp_options = data_cache.get(cache_key_popular)
+        if mp_options is None:
+            from sqlalchemy import func
             
-            if tag_id:
-                tag = session.query(Tags).filter(Tags.id == tag_id).first()
-                if tag:
-                    filter_info["tag"] = {"id": tag.id, "name": tag.name}
-        
-        # 获取所有标签用于筛选下拉
-        tags = session.query(Tags).filter(Tags.status == 1).order_by(Tags.name).all()
-        tag_options = [{"id": tag.id, "name": tag.name} for tag in tags]
-        
-        # 获取热门公众号（文章数量最多的前10个）- 使用子查询提高性能
-        from sqlalchemy import func, text
-        
-        # 先计算文章数量，再join减少计算量
-        article_counts = session.query(
-            Article.mp_id,
-            func.count(Article.id).label('article_count')
-        ).filter(
-            Article.status == 1
-        ).group_by(
-            Article.mp_id
-        ).subquery()
-        
-        popular_mps = session.query(
-            Feed.id, Feed.mp_name, Feed.mp_cover,
-            article_counts.c.article_count
-        ).join(
-            article_counts, Feed.id == article_counts.c.mp_id
-        ).filter(
-            article_counts.c.article_count > 0
-        ).order_by(
-            article_counts.c.article_count.desc()
-        ).limit(10).all()
-        
-        mp_options = [{"id": str(row[0]), "name": row[1]} for row in popular_mps] if popular_mps else []
+            popular_mps = session.query(
+                Feed.id, Feed.mp_name,
+                func.count(Article.id).label('article_count')
+            ).join(
+                Article, Feed.id == Article.mp_id
+            ).filter(
+                Article.status == 1,
+                Feed.status == 1
+            ).group_by(
+                Feed.id, Feed.mp_name
+            ).order_by(
+                func.count(Article.id).desc()
+            ).limit(10).all()
+            
+            mp_options = [{"id": str(row[0]), "name": row[1]} for row in popular_mps]
+            data_cache.set(cache_key_popular, mp_options)  # 使用默认TTL（1小时）
         
         # 计算分页信息
         total_pages = (total + limit - 1) // limit
@@ -192,13 +189,15 @@ async def articles_view(
         template_path = base.articles_template
         with open(template_path, 'r', encoding='utf-8') as f:
             template_content = f.read()
-        feed_info=feeds_dict.get(mp_id) if mp_id else None
-        info={
+        
+        feed_info = feed_dict.get(mp_id) if mp_id else None
+        info = {
             "mp_name": feed_info.mp_name if feed_info else "",
             "mp_cover": Web.get_image_url(feed_info.mp_cover) if feed_info else "",
             "mp_intro": feed_info.mp_intro if feed_info else "",
             "mp_id": mp_id,
-        } if feed_info else ""
+        } if feed_info else {}
+        
         parser = TemplateParser(template_content, template_dir=base.public_dir)
         html_content = parser.render({
             "articles": article_list,

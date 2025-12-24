@@ -97,7 +97,6 @@ async def home_view(
             "limit": limit,
             "has_prev": has_prev,
             "has_next": has_next,
-            "breadcrumb": breadcrumb
         })
         
         return HTMLResponse(content=html_content)

@@ -9,6 +9,7 @@ from core.models import User as DBUser
 from core.config import  cfg,API_BASE
 from sqlalchemy.orm import Session
 from core.models import User
+from sqlalchemy import or_
 import core.db  as db
 from passlib.context import CryptContext
 import json
@@ -54,22 +55,27 @@ def get_login_attempts(username: str) -> int:
     """获取用户登录失败次数"""
     return _login_attempts.get(username, 0)
 
-def get_user(username: str) -> Optional[dict]:
+def get_user(identifier: str) -> Optional[dict]:
     """从数据库获取用户，带缓存功能"""
     # 先检查缓存
-    if username in _user_cache:
-        return _user_cache[username]
+    if identifier in _user_cache:
+        return _user_cache[identifier]
         
     session = DB.get_session()
     try:
-        user = session.query(DBUser).filter(DBUser.username == username).first()
+        user = session.query(DBUser).filter(
+            or_(DBUser.username == identifier, DBUser.phone == identifier)
+        ).first()
         if user:
             # 转换为字典并存入缓存
             user_dict = user.__dict__.copy()
             # 移除 SQLAlchemy 内部属性（如 _sa_instance_state）
             user_dict.pop('_sa_instance_state', None)
             user_dict=User(**user_dict)
-            _user_cache[username] = user_dict
+            _user_cache[identifier] = user_dict
+            _user_cache[user.username] = user_dict
+            if getattr(user, "phone", None):
+                _user_cache[user.phone] = user_dict
             return user_dict
         return None
     except Exception as e:
@@ -143,10 +149,27 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     if user is None:
         raise credentials_exception
         
+    permissions = user.permissions
+    if isinstance(permissions, str):
+        try:
+            permissions = json.loads(permissions)
+        except Exception:
+            permissions = [permissions] if permissions else []
+    if permissions is None:
+        permissions = []
     return {
         "username": user.username,
+        "user_id": user.id,
+        "phone": user.phone,
         "role": user.role,
-        "permissions": user.permissions,
+        "permissions": permissions,
+        "plan_tier": getattr(user, "plan_tier", "free"),
+        "plan_expires_at": getattr(user, "plan_expires_at", None),
+        "monthly_ai_quota": getattr(user, "monthly_ai_quota", 0),
+        "monthly_ai_used": getattr(user, "monthly_ai_used", 0),
+        "monthly_image_quota": getattr(user, "monthly_image_quota", 0),
+        "monthly_image_used": getattr(user, "monthly_image_used", 0),
+        "quota_reset_at": getattr(user, "quota_reset_at", None),
         "original_user": user
     }
 

@@ -13,6 +13,57 @@ from tools.fix import fix_article
 router = APIRouter(prefix=f"/articles", tags=["文章管理"])
 
 
+def _owner(current_user: dict) -> str:
+    return current_user.get("username")
+
+
+def _try_fetch_article_content(article: Article, session) -> tuple[bool, str]:
+    """
+    在正文为空时尝试抓取全文。
+    返回: (是否成功, 错误信息)
+    """
+    if (article.content or "").strip():
+        return True, "正文已存在，无需重新抓取"
+
+    url = (article.url or "").strip()
+    if not url:
+        return False, "文章缺少原文链接，无法抓取全文"
+
+    try:
+        mode = str(cfg.get("gather.content_mode", "web")).lower()
+        content = ""
+        if mode == "web":
+            from driver.wxarticle import Web
+            info = Web.get_article_content(url)
+            content = (info or {}).get("content", "") or ""
+        else:
+            from core.wx.base import WxGather
+            content = WxGather().Model().content_extract(url) or ""
+
+        content = content.strip()
+        if not content:
+            return False, "未抓取到正文内容，请检查公众号授权状态后重试"
+
+        if content == "DELETED":
+            article.status = DATA_STATUS.DELETED
+            session.commit()
+            return False, "该文章已删除或不可访问"
+
+        article.content = content
+        session.commit()
+        return True, ""
+    except Exception as e:
+        return False, f"抓取正文失败: {e}"
+
+
+def _build_article_detail(article: Article) -> dict:
+    data = fix_article(article)
+    has_content = bool((article.content or "").strip())
+    data["has_content"] = has_content
+    data["content_tip"] = "" if has_content else "正文暂未抓取，可点击“抓取全文”或直接查看原文"
+    return data
+
+
     
 @router.delete("/clean", summary="清理无效文章(MP_ID不存在于Feeds表中的文章)")
 async def clean_orphan_articles(
@@ -24,8 +75,10 @@ async def clean_orphan_articles(
         from core.models.article import Article
         
         # 找出Articles表中mp_id不在Feeds表中的记录
-        subquery = session.query(Feed.id).subquery()
+        owner_id = _owner(current_user)
+        subquery = session.query(Feed.id).filter(Feed.owner_id == owner_id).subquery()
         deleted_count = session.query(Article)\
+            .filter(Article.owner_id == owner_id)\
             .filter(~Article.mp_id.in_(subquery))\
             .delete(synchronize_session=False)
         
@@ -62,7 +115,10 @@ async def toggle_article_read_status(
         from core.models.article import Article
         
         # 检查文章是否存在
-        article = session.query(Article).filter(Article.id == article_id).first()
+        article = session.query(Article).filter(
+            Article.id == article_id,
+            Article.owner_id == _owner(current_user)
+        ).first()
         if not article:
             raise HTTPException(
                 status_code=fast_status.HTTP_404_NOT_FOUND,
@@ -101,14 +157,31 @@ async def toggle_article_read_status(
 async def clean_duplicate(
     current_user: dict = Depends(get_current_user)
 ):
+    session = DB.get_session()
     try:
-        from tools.clean import clean_duplicate_articles
-        (msg, deleted_count) =clean_duplicate_articles()
+        owner_id = _owner(current_user)
+        # 仅清理当前用户名下重复URL，保留最新一条
+        query = session.query(Article).filter(
+            Article.owner_id == owner_id,
+            Article.status != DATA_STATUS.DELETED
+        ).order_by(Article.url.asc(), Article.publish_time.desc())
+        seen_urls = set()
+        deleted_count = 0
+        for item in query:
+            url = item.url or f"__EMPTY__{item.id}"
+            if url in seen_urls:
+                item.status = DATA_STATUS.DELETED
+                deleted_count += 1
+            else:
+                seen_urls.add(url)
+        session.commit()
+        msg = "清理重复文章成功"
         return success_response({
             "message": msg,
             "deleted_count": deleted_count
         })
     except Exception as e:
+        session.rollback()
         print(f"清理重复文章: {str(e)}")
         raise HTTPException(
             status_code=fast_status.HTTP_201_CREATED,
@@ -134,9 +207,10 @@ async def get_articles(
       
         
         # 构建查询条件
-        query = session.query(ArticleBase)
+        owner_id = _owner(current_user)
+        query = session.query(ArticleBase).filter(ArticleBase.owner_id == owner_id)
         if has_content:
-            query=session.query(Article)
+            query = session.query(Article).filter(Article.owner_id == owner_id)
         if status:
             query = query.filter(Article.status == status)
         else:
@@ -163,7 +237,10 @@ async def get_articles(
         mp_names = {}
         for article in articles:
             if article.mp_id and article.mp_id not in mp_names:
-                feed = session.query(Feed).filter(Feed.id == article.mp_id).first()
+                feed = session.query(Feed).filter(
+                    Feed.id == article.mp_id,
+                    Feed.owner_id == owner_id
+                ).first()
                 mp_names[article.mp_id] = feed.mp_name if feed else "未知公众号"
         
         # 合并公众号名称到文章列表
@@ -193,11 +270,16 @@ async def get_articles(
 async def get_article_detail(
     article_id: str,
     content: bool = False,
-    # current_user: dict = Depends(get_current_user)
+    auto_fetch: bool = Query(False, description="正文为空时自动尝试抓取全文"),
+    current_user: dict = Depends(get_current_user)
 ):
     session = DB.get_session()
     try:
-        article = session.query(Article).filter(Article.id==article_id).filter(Article.status != DATA_STATUS.DELETED).first()
+        article = session.query(Article).filter(
+            Article.id == article_id,
+            Article.owner_id == _owner(current_user),
+            Article.status != DATA_STATUS.DELETED
+        ).first()
         if not article:
             from .base import error_response
             raise HTTPException(
@@ -207,7 +289,11 @@ async def get_article_detail(
                     message="文章不存在"
                 )
             )
-        return success_response(fix_article(article))
+        if auto_fetch and not (article.content or "").strip():
+            _try_fetch_article_content(article, session)
+            session.refresh(article)
+
+        return success_response(_build_article_detail(article))
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -229,7 +315,10 @@ async def delete_article(
         from core.models.article import Article
         
         # 检查文章是否存在
-        article = session.query(Article).filter(Article.id == article_id).first()
+        article = session.query(Article).filter(
+            Article.id == article_id,
+            Article.owner_id == _owner(current_user)
+        ).first()
         if not article:
             raise HTTPException(
                 status_code=fast_status.HTTP_406_NOT_ACCEPTABLE,
@@ -255,6 +344,45 @@ async def delete_article(
             )
         )
 
+
+@router.post("/{article_id}/fetch_content", summary="抓取文章全文")
+async def fetch_article_content(
+    article_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    session = DB.get_session()
+    try:
+        article = session.query(Article).filter(
+            Article.id == article_id,
+            Article.owner_id == _owner(current_user),
+            Article.status != DATA_STATUS.DELETED
+        ).first()
+        if not article:
+            raise HTTPException(
+                status_code=fast_status.HTTP_404_NOT_FOUND,
+                detail=error_response(
+                    code=40401,
+                    message="文章不存在"
+                )
+            )
+
+        ok, reason = _try_fetch_article_content(article, session)
+        session.refresh(article)
+        data = _build_article_detail(article)
+        data["fetch_ok"] = ok
+        data["fetch_message"] = "抓取全文成功" if ok else reason
+        return success_response(data, message=data["fetch_message"])
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=fast_status.HTTP_406_NOT_ACCEPTABLE,
+            detail=error_response(
+                code=50001,
+                message=f"抓取文章全文失败: {str(e)}"
+            )
+        )
+
 @router.get("/{article_id}/next", summary="获取下一篇文章")
 async def get_next_article(
     article_id: str,
@@ -263,7 +391,11 @@ async def get_next_article(
     session = DB.get_session()
     try:
         # 获取当前文章的发布时间
-        current_article = session.query(Article).filter(Article.id == article_id).first()
+        owner_id = _owner(current_user)
+        current_article = session.query(Article).filter(
+            Article.id == article_id,
+            Article.owner_id == owner_id
+        ).first()
         if not current_article:
             raise HTTPException(
                 status_code=fast_status.HTTP_404_NOT_FOUND,
@@ -277,6 +409,7 @@ async def get_next_article(
         next_article = session.query(Article)\
             .filter(Article.publish_time > current_article.publish_time)\
             .filter(Article.status != DATA_STATUS.DELETED)\
+            .filter(Article.owner_id == owner_id)\
             .filter(Article.mp_id == current_article.mp_id)\
             .order_by(Article.publish_time.asc())\
             .first()
@@ -309,7 +442,11 @@ async def get_prev_article(
     session = DB.get_session()
     try:
         # 获取当前文章的发布时间
-        current_article = session.query(Article).filter(Article.id == article_id).first()
+        owner_id = _owner(current_user)
+        current_article = session.query(Article).filter(
+            Article.id == article_id,
+            Article.owner_id == owner_id
+        ).first()
         if not current_article:
             raise HTTPException(
                 status_code=fast_status.HTTP_404_NOT_FOUND,
@@ -323,6 +460,7 @@ async def get_prev_article(
         prev_article = session.query(Article)\
             .filter(Article.publish_time < current_article.publish_time)\
             .filter(Article.status != DATA_STATUS.DELETED)\
+            .filter(Article.owner_id == owner_id)\
             .filter(Article.mp_id == current_article.mp_id)\
             .order_by(Article.publish_time.desc())\
             .first()

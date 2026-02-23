@@ -83,9 +83,9 @@ def reload_job():
     TaskQueue.clear_queue()
     start_job()
 
-def run(job_id:str=None,isTest=False):
+def run(job_id:str=None,isTest=False,owner_id: str = None):
     from .taskmsg import get_message_task
-    tasks=get_message_task(job_id)
+    tasks=get_message_task(job_id, owner_id=owner_id)
     if not tasks:
         print("没有任务")
         return None
@@ -116,7 +116,11 @@ def start_job(job_id:str=None):
 def start_all_task():
       #开启自动同步未同步 文章任务
     from jobs.fetch_no_article import start_sync_content
+    from jobs.ai_publish import start_publish_queue_worker
+    from jobs.billing import start_subscription_sweep_worker
     start_sync_content()
+    start_publish_queue_worker()
+    start_subscription_sweep_worker()
     start_job()
 if __name__ == '__main__':
     # do_job()

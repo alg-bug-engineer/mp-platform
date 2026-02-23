@@ -18,6 +18,10 @@ from .base import success_response, error_response
 
 router = APIRouter(prefix="/message_tasks", tags=["消息任务"])
 
+
+def _owner(current_user: dict) -> str:
+    return current_user.get("username")
+
 @router.get("", summary="获取消息任务列表")
 async def list_message_tasks(
     limit: int = Query(10, ge=1, le=100),
@@ -44,7 +48,7 @@ async def list_message_tasks(
     """
     try:
         db.expire_all()
-        query = db.query(MessageTask)
+        query = db.query(MessageTask).filter(MessageTask.owner_id == _owner(current_user))
         if status is not None:
             query = query.filter(MessageTask.status == status)
         
@@ -84,7 +88,10 @@ async def get_message_task(
         500: 数据库查询异常
     """
     try:
-        message_task = db.query(MessageTask).filter(MessageTask.id == task_id).first()
+        message_task = db.query(MessageTask).filter(
+            MessageTask.id == task_id,
+            MessageTask.owner_id == _owner(current_user)
+        ).first()
         if not message_task:
             raise HTTPException(status_code=404, detail="Message task not found")
         return success_response(data=message_task)
@@ -110,7 +117,10 @@ async def test_message_task(
         500: 数据库查询异常
     """
     try:
-        message_task = db.query(MessageTask).filter(MessageTask.id == task_id).first()
+        message_task = db.query(MessageTask).filter(
+            MessageTask.id == task_id,
+            MessageTask.owner_id == _owner(current_user)
+        ).first()
         if not message_task:
             raise HTTPException(status_code=404, detail="Message task not found")
         return success_response(data=message_task)
@@ -143,7 +153,7 @@ async def run_message_task(
             "count":0,
             "list":[]
         }
-        tasks=run(task_id,isTest=isTest)
+        tasks=run(task_id,isTest=isTest,owner_id=_owner(current_user))
         count=0
         if not tasks:
             raise HTTPException(status_code=404, detail="Message task not found")
@@ -199,6 +209,7 @@ async def create_message_task(
     try:
         db_task = MessageTask(
             id=str(uuid.uuid4()),
+            owner_id=_owner(current_user),
             message_template=task_data.message_template,
             web_hook_url=task_data.web_hook_url,
             cron_exp=task_data.cron_exp,
@@ -239,7 +250,10 @@ async def update_message_task(
         500: 数据库操作异常
     """
     try:
-        db_task = db.query(MessageTask).filter(MessageTask.id == task_id).first()
+        db_task = db.query(MessageTask).filter(
+            MessageTask.id == task_id,
+            MessageTask.owner_id == _owner(current_user)
+        ).first()
         if not db_task:
             raise HTTPException(status_code=404, detail="Message task not found")
         
@@ -270,6 +284,8 @@ async def fresh_message_task(
     """
     重载任务
     """
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可重载任务")
     from jobs.mps import reload_job
     reload_job()
     return success_response(message="任务已经重载成功")
@@ -293,7 +309,10 @@ async def delete_message_task(
     """
     db=DB.get_session()
     try:
-        db_task = db.query(MessageTask).filter(MessageTask.id == task_id).first()
+        db_task = db.query(MessageTask).filter(
+            MessageTask.id == task_id,
+            MessageTask.owner_id == _owner(current_user)
+        ).first()
         if not db_task:
             raise HTTPException(status_code=404, detail="Message task not found")
         

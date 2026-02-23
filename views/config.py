@@ -12,12 +12,12 @@ class Config:
     article_detail_template = f"{base_path}/templates/article_detail.html"
     articles_template = f"{base_path}/templates/articles.html"
     site={
-        "name": cfg.get("site.name", "WeRss"),
-        "description": cfg.get("site.description", "A WeChat Official Account RSS Reader"), 
-        "keywords": cfg.get("site.keywords", "WeRss,RSS,微信公众号,RSS订阅,RSS阅读器,RSS订阅助手,RSS订阅器,RSS订阅器,RSS订阅器,RSS订阅器"),
+        "name": cfg.get("site.name", "Content Studio"),
+        "description": cfg.get("site.description", "A commercial WeChat content studio"), 
+        "keywords": cfg.get("site.keywords", "Content Studio,RSS,微信公众号,内容创作,内容分发"),
         "logo": cfg.get("site.logo", "/static/logo.svg"),
         "favicon": cfg.get("site.favicon", "/static/logo.svg"),
-        "author": cfg.get("site.author", "WeRss Team"),
-        "copyright": cfg.get("site.copyright", "© 2024 WeRss Team"),
+        "author": cfg.get("site.author", "Content Studio Team"),
+        "copyright": cfg.get("site.copyright", "© 2026 Content Studio Team"),
     }
 base = Config()

@@ -29,6 +29,7 @@ class Wx:
     CallBack=None
     Notice=None
     ext_data = None
+    last_login_error = ""
     # 添加线程锁保护共享变量
     _login_lock = Lock()
     def __init__(self):
@@ -159,7 +160,7 @@ class Wx:
                                     token="-"
                                     pass
                                 self.Close()
-                                sys_notice(f"账号切换成功\n- 账号名称: {account_name} \n- 账号ID: {account_id} \n - Token: {token} \n- 过期时间: {exp_time}", str(cfg.get("server.code_title","WeRss账号切换成功")))
+                                sys_notice(f"账号切换成功\n- 账号名称: {account_name} \n- 账号ID: {account_id} \n - Token: {token} \n- 过期时间: {exp_time}", str(cfg.get("server.code_title","Content Studio 账号切换成功")))
                                 return True
                             else:
                                 print_warning("没有找到可切换的账号")
@@ -178,6 +179,7 @@ class Wx:
             return False 
     def GetCode(self,CallBack=None,Notice=None):
         self.Notice=Notice
+        self.last_login_error = ""
         if  self.check_lock():
             print_warning("微信公众平台登录脚本正在运行，请勿重复运行")
             return {
@@ -191,6 +193,26 @@ class Wx:
         self.thread.start()  # 启动线程
         from core.ver import VERSION
         print(f"微信公众平台登录 v{VERSION}")
+        # 启动后短暂轮询，尽早把启动失败返回给前端，避免只拿到404二维码地址
+        for _ in range(20):
+            if self.GetHasCode():
+                break
+            if self.last_login_error:
+                return {
+                    "code": "",
+                    "is_exists": False,
+                    "msg": self.last_login_error,
+                }
+            if not self.thread.is_alive():
+                break
+            time.sleep(0.1)
+
+        if self.last_login_error and (not self.GetHasCode()):
+            return {
+                "code": "",
+                "is_exists": False,
+                "msg": self.last_login_error,
+            }
         return WX_API.QRcode()
     
     wait_time=1
@@ -372,10 +394,12 @@ class Wx:
             from .success import setStatus
             with self._login_lock:
                 self._haslogin=True
+            self.last_login_error = ""
             setStatus(True)
             self.CallBack=CallBack
             self.Call_Success()
         except Exception as e:
+            self.last_login_error = str(e)
             if "Timeout" in str(e):
                 print_warning("\n扫码登录超时，请重新运行程序进行扫码登录")
             else:

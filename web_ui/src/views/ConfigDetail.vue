@@ -6,6 +6,7 @@ import {
   updateConfig, 
   deleteConfig 
 } from '@/api/configManagement'
+import { getCurrentUser } from '@/api/auth'
 import type { ConfigManagement, ConfigManagementUpdate } from '@/types/configManagement'
 import { Modal } from '@arco-design/web-vue'
 
@@ -15,15 +16,29 @@ const config = ref<ConfigManagement | null>(null)
 const loading = ref(false)
 const error = ref('')
 const isEditing = ref(false)
+const canEdit = ref(false)
 const form = reactive<ConfigManagementUpdate>({
   config_value: '',
   description: ''
 })
 
+const fetchPermission = async () => {
+  try {
+    const user = await getCurrentUser()
+    const permissions = Array.isArray(user?.permissions) ? user.permissions : []
+    canEdit.value =
+      user?.role === 'admin' ||
+      permissions.includes('admin') ||
+      permissions.includes('config:edit')
+  } catch {
+    canEdit.value = false
+  }
+}
+
 const fetchConfig = async (key: string) => {
   try {
     loading.value = true
-    const { data } = await getConfig(key)
+    const data = await getConfig(key)
     config.value = data
     Object.assign(form, {
       config_value: data.config_value,
@@ -37,6 +52,7 @@ const fetchConfig = async (key: string) => {
 }
 
 const handleUpdate = async () => {
+  if (!canEdit.value) return
   try {
     loading.value = true
     if (config.value) {
@@ -52,6 +68,7 @@ const handleUpdate = async () => {
 }
 
 const handleDelete = () => {
+  if (!canEdit.value) return
   if (!config.value) return
   
   Modal.confirm({
@@ -71,6 +88,7 @@ const handleDelete = () => {
 }
 
 onMounted(() => {
+  fetchPermission()
   fetchConfig(route.params.key as string)
 })
 </script>
@@ -83,25 +101,25 @@ onMounted(() => {
     >
       <template #extra>
         <a-space>
-          <a-button v-if="!isEditing" type="primary" @click="isEditing = true">
+          <a-button v-if="canEdit && !isEditing" type="primary" @click="isEditing = true">
             <template #icon>
               <icon-edit />
             </template>
             编辑
           </a-button>
-          <a-button v-if="!isEditing" status="danger" @click="handleDelete">
+          <a-button v-if="canEdit && !isEditing" status="danger" @click="handleDelete">
             <template #icon>
               <icon-delete />
             </template>
             删除
           </a-button>
-          <a-button v-if="isEditing" type="primary" @click="handleUpdate">
+          <a-button v-if="canEdit && isEditing" type="primary" @click="handleUpdate">
             <template #icon>
               <icon-save />
             </template>
             保存
           </a-button>
-          <a-button v-if="isEditing" @click="isEditing = false">
+          <a-button v-if="canEdit && isEditing" @click="isEditing = false">
             <template #icon>
               <icon-close />
             </template>

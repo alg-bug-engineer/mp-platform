@@ -1,13 +1,13 @@
-app_name: ${APP_NAME:-we-mp-rss}
+app_name: ${APP_NAME:-content-studio}
 server:
    #服务名称
-   name: ${SERVER_NAME:-we-mp-rss}
+   name: ${SERVER_NAME:-content-studio}
    #前端显示名称
-   web_name: ${WEB_NAME:-WeRSS微信公众号订阅助手}
+   web_name: ${WEB_NAME:-商业化内容创作平台}
    #过期是否发送授权二维通知 默认True
    send_code: ${SEND_CODE:-True}
    #二维通知标题
-   code_title: ${CODE_TITLE:-WeRSS}
+   code_title: ${CODE_TITLE:-Content Studio}
    #启动JOB定时任务，默认为True
    enable_job: ${ENABLE_JOB:-True}
    #代码修改自动重启服务，默认为False
@@ -31,8 +31,8 @@ notice:
   feishu: "${FEISHU_WEBHOOK}"
   custom: "${CUSTOM_WEBHOOK}"
   
-secret: ${SECRET_KEY:-we-mp-rss}
-user_agent: ${USER_AGENT:-Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36/WeRss}
+secret: ${SECRET_KEY:-content-studio}
+user_agent: ${USER_AGENT:-Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36/ContentStudio}
 
 #定时任务执行每篇稿件间隔时间 单位秒 默认10s 允许值 1-60秒之间
 interval: ${SPAN_INTERVAL:- 10}
@@ -113,14 +113,18 @@ safe:
     # 需要隐藏的配置信息，用逗号分隔 如：db,secret,token等 
     hide_config: "${SAFE_HIDE_CONFIG:-db,secret,token,notice.wechat,notice.feishu,notice.dingding}"
     # 授权加密KEY
-    lic_key: "${SAFE_LIC_KEY:-RACHELOS}"
+    lic_key: "${SAFE_LIC_KEY:-CONTENT_STUDIO}"
 # 微信账号配置
 wechat:
   # 允许切换的账号ID列表，为空表示允许所有账号，用逗号分隔
   # 例如: "account1,account2,account3" 或留空 ""
   allowed_accounts: "${WECHAT_ALLOWED_ACCOUNTS:-}"
+  # 公众号后台 IP 白名单提示（用于前端弹窗展示）
+  whitelist_ips: "${WECHAT_WHITELIST_IPS:-}"
+  whitelist_guide: "${WECHAT_WHITELIST_GUIDE:-请在微信公众平台-设置与开发-基本配置-IP白名单中添加平台出口IP后，再执行草稿同步。}"
+  whitelist_doc_url: "${WECHAT_WHITELIST_DOC_URL:-https://mp.weixin.qq.com/}"
 log:
-  #日志文件路径，默认为空字符串，表示不输出到文件。如果要输出到文件，可以指定一个路径如：/var/log/we-mp-rss.log 如果为空就不纪录
+  #日志文件路径，默认为空字符串，表示不输出到文件。如果要输出到文件，可以指定一个路径如：/var/log/content-studio.log 如果为空就不纪录
    file: ${LOG_FILE:-}
   #日志级别，默认为INFO，可选DEBUG, INFO, WARNING, ERROR, CRITICAL
    level: ${LOG_LEVEL:-INFO}
@@ -134,10 +138,33 @@ export:
     #是否启用markdown导出功能 默认False
     enable: ${EXPORT_MARKDOWN:-False}
     #markdown导出目录 默认./data/markdown
-    dir: ${EXPORT_MARKDOWN_DIR:-./data/markdown}
+   dir: ${EXPORT_MARKDOWN_DIR:-./data/markdown}
+
+ai:
+  # 本地规则文件（标签推荐、平台模板、文风约束）
+  local_rules_file: ${AI_LOCAL_RULES_FILE:-./data/ai_local_rules.yaml}
+  # 是否启用 AI 二次润色（降低模板腔）
+  refine_enabled: ${AI_REFINE_ENABLED:-True}
+  # 本地草稿箱目录（用于保存 AI 生成稿）
+  draft_dir: ${AI_DRAFT_DIR:-./data/ai_drafts}
+  # 投递队列处理间隔（秒）
+  publish_queue_interval_seconds: ${AI_PUBLISH_QUEUE_INTERVAL_SECONDS:-45}
+  jimeng:
+    # 即梦生图鉴权（为空则仅返回配图提示词）
+    ak: ${JIMENG_AK:-}
+    sk: ${JIMENG_SK:-}
+    # 主模型，默认 v40。若权限不足将尝试 fallback_req_keys
+    req_key: ${JIMENG_REQ_KEY:-jimeng_t2i_v40}
+    fallback_req_keys: ${JIMENG_FALLBACK_REQ_KEYS:-jimeng_t2i_v30}
+    scale: ${JIMENG_SCALE:-0.5}
+    max_retries: ${JIMENG_MAX_RETRIES:-20}
+
+billing:
+  # 订阅到期扫描间隔（秒）
+  subscription_sweep_interval_seconds: ${BILLING_SWEEP_INTERVAL_SECONDS:-3600}
 
 
 site:
-  name: ${SITE_NAME:-WeRss}
-  description: ${SITE_DESCRIPTION:-A WeChat Official Account RSS Reader}
+  name: ${SITE_NAME:-Content Studio}
+  description: ${SITE_DESCRIPTION:-A commercial WeChat content studio}
   keywords: ${SITE_KEYWORDS:-}

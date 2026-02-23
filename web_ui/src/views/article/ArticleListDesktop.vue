@@ -2,25 +2,10 @@
   <a-spin :loading="fullLoading" tip="正在刷新..." size="large">
     <a-layout class="article-list">
       
-      <a-layout-sider :width="300"
+      <a-layout-sider :width="260"
         :style="{ background: '#fff', padding: '0', borderRight: '1px solid #eee', display: 'flex', flexDirection: 'column', border: 0 }">
         <a-card :bordered="false" title="公众号"
           :headStyle="{ padding: '12px 16px', borderBottom: '1px solid #eee', background: '#fff', zIndex: 1, border: 0 }">
-          <template #extra>
-            <a-dropdown>
-              <a-button type="primary">
-                <template #icon><icon-plus /></template>
-                订阅
-                <icon-down />
-              </a-button>
-              <template #content>
-                <a-doption @click="showAddModal"><template #icon><icon-plus /></template>添加公众号</a-doption>
-                <a-doption @click="exportMPS"><template #icon><icon-export /></template>导出公众号</a-doption>
-                <a-doption @click="importMPS"><template #icon><icon-import /></template>导入公众号</a-doption>
-                <a-doption @click="exportOPML"><template #icon><icon-share-external /></template>导出OPML</a-doption>
-              </template>
-            </a-dropdown>
-          </template>
           <div style="display: flex; flex-direction: column;; background: #fff">
             <div style="margin-bottom: 12px;">
               <a-input-search 
@@ -58,10 +43,10 @@
         </a-card>
       </a-layout-sider>
 
-      <a-layout-content :style="{ padding: '20px', width: '100%' }">
-        <a-page-header :title="activeFeed ? activeFeed.name : '全部'" :subtitle="'管理您的公众号订阅内容'" :show-back="false">
+      <a-layout-content class="article-content" :style="{ padding: '20px' }">
+        <a-page-header :title="activeFeed ? activeFeed.name : '全部'" :subtitle="'管理您的内容池文章'" :show-back="false">
           <template #extra>
-            <a-space>
+            <a-space class="header-actions" wrap>
               <span style="font-size: 12px; color: var(--color-text-3);">{{ issourceUrl ? '原链接' : '内链' }}</span>
               <a-switch 
                 v-model="issourceUrl" 
@@ -99,45 +84,33 @@
                 <template #icon><icon-scan /></template>
                 刷新授权
               </a-button>
-              <a-dropdown>
-                <a-button>
-                  <template #icon>
-                    <IconWifi />
-                  </template>
-                  订阅
-                  <icon-down />
-                </a-button>
-                <template #content>
-                  <a-doption @click="rssFormat = 'atom'; openRssFeed()"><template #icon>
-                      <TextIcon text="atom" />
-                    </template>ATOM</a-doption>
-                  <a-doption @click="rssFormat = 'rss'; openRssFeed()"><template #icon>
-                      <TextIcon text="rss" />
-                    </template>RSS</a-doption>
-                  <a-doption @click="rssFormat = 'json'; openRssFeed()"><template #icon>
-                      <TextIcon text="json" />
-                    </template>JSON</a-doption>
-                  <a-doption @click="rssFormat = 'md'; openRssFeed()"><template #icon>
-                      <TextIcon text="md" />
-                    </template>Markdown</a-doption>
-                  <a-doption @click="rssFormat = 'txt'; openRssFeed()"><template #icon>
-                      <TextIcon text="txt" />
-                    </template>Text</a-doption>
-                </template>
-              </a-dropdown>
-              <a-button type="primary" status="danger" @click="handleBatchDelete" :disabled="!selectedRowKeys.length">
-                <template #icon><icon-delete /></template>
-                批量删除
-              </a-button>
             </a-space>
           </template>
         </a-page-header>
 
         <a-card style="border:0">
-          <a-alert type="success" closable>{{ activeFeed?.mp_intro || "请选择一个公众号码进行管理,搜索文章后再点击订阅会有惊喜哟！！！" }}</a-alert>
-          <div class="search-bar">
-            <a-input-search v-model="searchText" placeholder="搜索文章标题" @search="handleSearch" @keyup.enter="handleSearch"
+          <a-alert type="success" closable>{{ activeFeed?.mp_intro || "请选择公众号进行管理" }}</a-alert>
+          <div class="search-toolbar">
+            <a-input-search class="search-input" v-model="searchText" placeholder="搜索文章标题" @search="handleSearch" @keyup.enter="handleSearch"
               allow-clear />
+            <a-button type="primary" status="danger" @click="handleBatchDelete" :disabled="!selectedRowKeys.length">
+              <template #icon><icon-delete /></template>
+              批量删除
+            </a-button>
+          </div>
+          <div class="source-filter-bar">
+            <span class="source-filter-label">来源筛选：</span>
+            <a-space wrap>
+              <a-tag
+                v-for="source in sourceFilterOptions"
+                :key="source.id || 'all'"
+                class="source-filter-tag"
+                :class="{ 'source-filter-tag-active': activeMpId === source.id }"
+                @click="handleSourceFilter(source.id)"
+              >
+                {{ source.name || source.mp_name || '未知来源' }}
+              </a-tag>
+            </a-space>
           </div>
           <a-table :columns="columns" :data="articles" :loading="loading" :pagination="pagination" :row-selection="{
             type: 'checkbox',
@@ -146,7 +119,7 @@
             fixed: true,
             checkStrictly: true,
             onlyCurrent: false
-          }" row-key="id" @page-change="handlePageChange" @page-size-change="handlePageSizeChange" v-model:selectedKeys="selectedRowKeys">
+          }" :scroll="{ x: 980 }" row-key="id" @page-change="handlePageChange" @page-size-change="handlePageSizeChange" v-model:selectedKeys="selectedRowKeys">
             <template #status="{ record }">
               <a-tag :color="statusColorMap[record.status]">
                 {{ statusTextMap[record.status] }}
@@ -183,12 +156,21 @@
             placement="left" :footer="false" :fullscreen="false" @before-close="resetScrollPosition">
             <h2 id="topreader">{{ currentArticle.title }}</h2>
             <div style="margin-top: 20px; color: var(--color-text-3); text-align: left">
-              <a-link :href="currentArticle.url" target="_blank">查看原文</a-link>
+              <a-link v-if="currentArticle.url" :href="currentArticle.url" target="_blank">查看原文</a-link>
+              <span v-else style="margin-right: 8px;">原文链接缺失</span>
               更新时间 ：{{ currentArticle.time }}
             <a-link @click="viewArticle(currentArticle,-1)" target="_blank">上一篇 </a-link>
             <a-space/>
             <a-link @click="viewArticle(currentArticle,1)" target="_blank">下一篇 </a-link>
             </div>
+            <a-alert v-if="!currentArticle.has_content" type="warning" style="margin: 16px 0;">
+              {{ currentArticle.content_tip || '正文暂未抓取，可点击“抓取全文”后重试。' }}
+              <template #action>
+                <a-button type="primary" size="mini" :loading="contentFetching" @click="manualFetchArticleContent">
+                  抓取全文
+                </a-button>
+              </template>
+            </a-alert>
             <div ref="shadowContainer" style="width: 100%; height: auto;"></div>
 
             <div style="margin-top: 20px; color: var(--color-text-3); text-align: right">
@@ -204,10 +186,10 @@
 <script setup lang="ts">
 import { Avatar } from '@/utils/constants'
 import { translatePage, setCurrentLanguage } from '@/utils/translate';
-import { ref, onMounted, h, nextTick, watch } from 'vue'
+import { ref, onMounted, h, nextTick, watch, computed } from 'vue'
 import axios from 'axios'
 import { IconApps, IconAtt, IconDelete, IconEdit, IconEye, IconRefresh, IconScan, IconWeiboCircleFill, IconWifi, IconCode, IconCheck, IconClose } from '@arco-design/web-vue/es/icon'
-import { getArticles, deleteArticle as deleteArticleApi, ClearArticle, ClearDuplicateArticle, getArticleDetail, toggleArticleReadStatus } from '@/api/article'
+import { getArticles, deleteArticle as deleteArticleApi, ClearArticle, ClearDuplicateArticle, getArticleDetail, fetchArticleContent, toggleArticleReadStatus } from '@/api/article'
 import { ExportOPML, ExportMPS, ImportMPS } from '@/api/export'
 import ExportModal from '@/components/ExportModal.vue'
 import { getSubscriptions, UpdateMps } from '@/api/subscription'
@@ -289,10 +271,12 @@ const columns = [
   {
     title: '文章标题',
     dataIndex: 'title',
-    width: window.innerWidth - 1100,
+    width: 360,
     ellipsis: true,
     render: ({ record }) => h('a', {
-      href: issourceUrl.value ? record.url || '#' : "/views/article/" + record.id,
+      href: issourceUrl.value
+        ? (record.url || `/views/article/${record.id}?auto_fetch=1`)
+        : `/views/article/${record.id}?auto_fetch=1`,
       title: record.title,
       target: '_blank',
       style: { 
@@ -350,17 +334,43 @@ const handleMpSearch = () => {
   fetchMpList()
 }
 const rssFormat = ref('atom')
+const defaultFeed = {
+  id: '',
+  name: '全部',
+  mp_intro: '显示所有公众号文章'
+}
 const activeFeed = ref({
   id: "",
   name: "全部",
+  mp_intro: '显示所有公众号文章'
+})
+const sourceFilterOptions = computed(() => {
+  const options = [{ id: '', name: '全部' }]
+  const existing = new Set<string>()
+  mpList.value.forEach((item: any) => {
+    const id = String(item?.id ?? '')
+    if (!id || existing.has(id)) {
+      return
+    }
+    existing.add(id)
+    options.push({
+      id,
+      name: item?.name || item?.mp_name || '未知来源',
+      mp_name: item?.mp_name
+    })
+  })
+  return options
 })
 const handleMpClick = (mpId: string) => {
   activeMpId.value = mpId
   pagination.value.current = 1
-  activeFeed.value = mpList.value.find(item => item.id === activeMpId.value)
+  activeFeed.value = mpList.value.find(item => item.id === activeMpId.value) || { ...defaultFeed }
   console.log(activeFeed.value)
 
   fetchArticles()
+}
+const handleSourceFilter = (mpId: string) => {
+  handleMpClick(mpId)
 }
 
 const fetchArticles = async () => {
@@ -387,7 +397,7 @@ const fetchArticles = async () => {
       ...item,
       mp_name: item.mp_name || item.account_name || '未知公众号',
       publish_time: item.publish_time || item.create_time || '-',
-      url: item.url || "https://mp.weixin.qq.com/s/" + item.id
+      url: item.url || `/views/article/${item.id}?auto_fetch=1`
     }))
     pagination.value.total = res.total || 0
   } catch (error) {
@@ -408,7 +418,6 @@ const initIssourceUrl = () => {
 }
 
 // 监听 issourceUrl 变化并保存到 localStorage
-import { watch } from 'vue'
 watch(issourceUrl, (newValue) => {
   localStorage.setItem('issourceUrl', newValue.toString())
 }, { immediate: false })
@@ -579,27 +588,33 @@ const showAddModal = () => {
 const handleAddSuccess = () => {
   fetchArticles()
 }
- const processedContent = (record: any) => {
- return ProxyImage(record.content)
- }
-const viewArticle = async (record: any,action_type: number) => {
+const processedContent = (record: any) => {
+  return ProxyImage(record.content || '')
+}
+const contentFetching = ref(false)
+const viewArticle = async (record: any, action_type: number = 0) => {
   loading.value = true
   try {
-    // console.log(record)
-    const article = await getArticleDetail(record.id,action_type)
+    const article = await getArticleDetail(record.id, action_type, true)
     currentArticle.value = {
       id: article.id,
       title: article.title,
       content: processedContent(article),
       time: formatDateTime(article.created_at),
-      url: article.url
+      url: article.url,
+      has_content: !!article.has_content,
+      content_tip: article.content_tip || ''
     }
     articleModalVisible.value = true
     window.location="#topreader"
+    if (shadowContainer.value) {
+      shadowContainer.value.innerHTML = ''
+    }
     
-    // 创建或更新 Shadow DOM
-    await nextTick()
-    createShadowHost()
+    if (currentArticle.value.has_content) {
+      await nextTick()
+      createShadowHost()
+    }
     
     // 自动标记为已读（仅在查看当前文章时，不是上一篇/下一篇）
     if (action_type === 0 && record.is_read !== 1) {
@@ -613,13 +628,38 @@ const viewArticle = async (record: any,action_type: number) => {
   }
 }
 const currentArticle = ref({
+  id: '',
   title: '',
   content: '',
   time: '',
-  url: ''
+  url: '',
+  has_content: true,
+  content_tip: ''
 })
 const articleModalVisible = ref(false)
 const shadowContainer = ref()
+
+const manualFetchArticleContent = async () => {
+  if (!currentArticle.value.id) return
+  contentFetching.value = true
+  try {
+    const article = await fetchArticleContent(currentArticle.value.id)
+    currentArticle.value.content = processedContent(article)
+    currentArticle.value.has_content = !!article.has_content
+    currentArticle.value.content_tip = article.content_tip || ''
+    if (currentArticle.value.has_content) {
+      await nextTick()
+      createShadowHost()
+      Message.success('正文抓取成功')
+    } else {
+      Message.warning(article.fetch_message || '未抓取到正文，请直接查看原文')
+    }
+  } catch (error: any) {
+    Message.error(String(error || '抓取全文失败'))
+  } finally {
+    contentFetching.value = false
+  }
+}
 
 const deleteArticle = (id: number) => {
   Modal.confirm({
@@ -704,6 +744,12 @@ const fetchMpList = async () => {
         mp_intro: '显示所有公众号文章',
         article_count: res.total || 0
       });
+    }
+    const selected = mpList.value.find(item => item.id === activeMpId.value)
+    if (selected) {
+      activeFeed.value = selected
+    } else if (!activeMpId.value) {
+      activeFeed.value = { ...defaultFeed }
     }
     mpPagination.value.total = res.total || 0
   } catch (error) {
@@ -874,7 +920,15 @@ const toggleReadStatus = async (record: any) => {
 
 <style scoped>
 .article-list {
-  /* height: calc(100vh - 186px); */
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.article-content {
+  min-width: 0;
+  width: auto;
 }
 
 .a-layout-sider {
@@ -896,9 +950,66 @@ const toggleReadStatus = async (record: any) => {
   background-color: var(--color-primary-light-1);
 }
 
-.search-bar {
+.search-toolbar {
   display: flex;
-  margin-bottom: 20px;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 260px;
+}
+
+.source-filter-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.source-filter-label {
+  color: var(--color-text-3);
+  font-size: 12px;
+  line-height: 28px;
+  white-space: nowrap;
+}
+
+.source-filter-tag {
+  cursor: pointer;
+  border: 1px solid var(--color-border-2);
+  transition: all 0.2s ease;
+}
+
+.source-filter-tag:hover {
+  border-color: rgb(var(--primary-6));
+  color: rgb(var(--primary-6));
+}
+
+.source-filter-tag-active {
+  color: rgb(var(--primary-6));
+  border-color: rgb(var(--primary-6));
+  background: var(--color-primary-light-1);
+}
+
+:deep(.arco-page-header-wrapper) {
+  min-width: 0;
+}
+
+:deep(.arco-page-header-extra) {
+  width: 100%;
+  max-width: 100%;
+}
+
+:deep(.arco-page-header-extra .arco-space) {
+  width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  row-gap: 8px;
 }
 
 .arco-drawer-body img {

@@ -206,8 +206,8 @@ async def get_mp_articles_source(
             query=query.filter(Article.mp_id==feed_id)
         else:
             feed=Feed()
-            feed.mp_name=cfg.get("rss.title","WeRss") or "WeRss"
-            feed.mp_intro=cfg.get("rss.description") or "WeRss高效订阅我的公众号"
+            feed.mp_name=cfg.get("rss.title","Content Studio")
+            feed.mp_intro=cfg.get("rss.description") or "Content Studio RSS 订阅频道"
             feed.mp_cover=cfg.get("rss.cover") or f"{rss_domain}static/logo.svg"
             #如果传入了tag_id就加载tag对应的订阅信息
             if tag_id is not None:

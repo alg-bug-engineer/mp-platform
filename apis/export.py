@@ -15,6 +15,10 @@ import os
 import uuid
 router = APIRouter(prefix=f"/export", tags=["导入/导出"])
 
+
+def _owner(current_user: dict) -> str:
+    return current_user.get("username")
+
 @router.get("/mps/export", summary="导出公众号列表")
 async def export_mps(
     limit: int = Query(1000, ge=1, le=10000),
@@ -25,7 +29,7 @@ async def export_mps(
     session = DB.get_session()
     try:
         from core.models.feed import Feed
-        query = session.query(Feed)
+        query = session.query(Feed).filter(Feed.owner_id == _owner(current_user))
         if kw:
             query = query.filter(Feed.mp_name.ilike(f"%{kw}%"))
 
@@ -76,6 +80,7 @@ async def import_mps(
     session = DB.get_session()
     try:
         from core.models.feed import Feed
+        owner_id = _owner(current_user)
 
         # 读取上传的CSV文件
         contents = (await file.read()).decode('utf-8-sig')
@@ -105,9 +110,18 @@ async def import_mps(
             mp_intro = row.get("简介", "")
             status_val = int(row.get("状态", 1)) if row.get("状态") else 1
             faker_id = row.get("faker_id", "")
+            import base64
+            try:
+                decoded = base64.b64decode(faker_id).decode("utf-8")
+            except Exception:
+                decoded = faker_id or str(uuid.uuid4())
+            mp_id = f"MP_WXS_{owner_id}_{decoded}"
 
             # 检查是否已存在
-            existing = session.query(Feed).filter(Feed.faker_id == faker_id).first()
+            existing = session.query(Feed).filter(
+                Feed.faker_id == faker_id,
+                Feed.owner_id == owner_id
+            ).first()
 
             if existing:
                 # 更新现有记录
@@ -120,6 +134,7 @@ async def import_mps(
                 # 创建新记录
                 mp = Feed(
                     id=mp_id,
+                    owner_id=owner_id,
                     mp_name=mp_name,
                     mp_cover=mp_cover,
                     mp_intro=mp_intro,
@@ -127,10 +142,6 @@ async def import_mps(
                     faker_id=faker_id,
                     created_at=datetime.now()
                 )
-                import base64
-                if mp.id == None:
-                    _mp_id=base64.b64decode(faker_id).decode("utf-8")
-                    mp.id=f"MP_WXS_{_mp_id}"
                 session.add(mp)
                 imported += 1
 
@@ -168,7 +179,7 @@ async def export_mps_opml(
     session = DB.get_session()
     try:
         from core.models.feed import Feed
-        query = session.query(Feed)
+        query = session.query(Feed).filter(Feed.owner_id == _owner(current_user))
         if kw:
             query = query.filter(Feed.mp_name.ilike(f"%{kw}%"))
 
@@ -224,7 +235,7 @@ async def export_tags(
     session = DB.get_session()
     try:
         from core.models.tags import Tags
-        query = session.query(Tags)
+        query = session.query(Tags).filter(Tags.owner_id == _owner(current_user))
         if kw:
             query = query.filter(Tags.name.ilike(f"%{kw}%"))
 
@@ -275,6 +286,7 @@ async def import_tags(
     session = DB.get_session()
     try:
         from core.models.tags import Tags
+        owner_id = _owner(current_user)
 
         contents = (await file.read()).decode('utf-8-sig')
         csv_reader = csv.DictReader(io.StringIO(contents))
@@ -304,7 +316,10 @@ async def import_tags(
 
             existing_tag = None
             if tag_id and tag_id.strip():
-                existing_tag = session.query(Tags).filter(Tags.id == tag_id.strip()).first()
+                existing_tag = session.query(Tags).filter(
+                    Tags.id == tag_id.strip(),
+                    Tags.owner_id == owner_id
+                ).first()
 
             cover = row.get("封面图", "")
             intro = row.get("描述", "")
@@ -325,6 +340,7 @@ async def import_tags(
             else:
                 new_tag = Tags(
                     id=str(uuid.uuid4()),
+                    owner_id=owner_id,
                     name=tag_name,
                     cover=cover,
                     intro=intro,

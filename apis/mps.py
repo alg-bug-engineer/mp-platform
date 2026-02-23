@@ -1,4 +1,5 @@
 from logging import info
+import re
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body, UploadFile, File
 from fastapi.responses import FileResponse
 from fastapi.background import BackgroundTasks
@@ -10,8 +11,10 @@ from .base import success_response, error_response
 from datetime import datetime
 from core.config import cfg
 from core.res import save_avatar_locally
+from core.wechat_auth_service import get_token_cookie
 import io
 import os
+import uuid
 from jobs.article import UpdateArticle
 from driver.wxarticle import WXArticleFetcher
 router = APIRouter(prefix=f"/mps", tags=["公众号管理"])
@@ -19,6 +22,34 @@ router = APIRouter(prefix=f"/mps", tags=["公众号管理"])
 # UPDB=db.Db("数据抓取")
 # def UpdateArticle(art:dict):
 #             return UPDB.add_article(art)
+
+
+def _owner(current_user: dict) -> str:
+    return current_user.get("username")
+
+
+def _is_auth_invalid_error(err_text: str) -> bool:
+    text = str(err_text or "").strip().lower()
+    if not text:
+        return False
+    patterns = [
+        "invalid session",
+        "请先扫码登录公众号平台",
+        "公众号平台登录失效",
+        "ret=200003",
+        "ret=200013",
+        "token",
+    ]
+    return any(p in text for p in patterns)
+
+
+def _sanitize_error(err_text: str) -> str:
+    text = str(err_text or "").strip()
+    if not text:
+        return "未知错误"
+    # 去掉极长 traceback / HTML 片段，避免直接回传噪音信息。
+    text = re.sub(r"\s+", " ", text)
+    return text[:220]
 
 
 @router.get("/search/{kw}", summary="搜索公众号")
@@ -30,7 +61,27 @@ async def search_mp(
 ):
     session = DB.get_session()
     try:
-        result = search_Biz(kw,limit=limit,offset=offset)
+        owner_id = _owner(current_user)
+        token, cookie = get_token_cookie(session, owner_id=owner_id, allow_global_fallback=True)
+        if not token or not cookie:
+            raise HTTPException(
+                status_code=status.HTTP_201_CREATED,
+                detail=error_response(
+                    code=50001,
+                    message="搜索公众号失败,请重新扫码授权！",
+                )
+            )
+
+        result = search_Biz(
+            kw,
+            limit=limit,
+            offset=offset,
+            token=token,
+            cookie=cookie,
+            user_agent=str(cfg.get("user_agent", "")),
+        )
+        if result is None:
+            raise RuntimeError("微信搜索接口返回空结果，可能触发平台频控，请稍后重试")
         data={
             'list':result.get('list') if result is not None else [],
             'page':{
@@ -40,15 +91,36 @@ async def search_mp(
             'total':result.get('total') if result is not None else 0
         }
         return success_response(data)
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"搜索公众号错误: {str(e)}")
+        err_text = _sanitize_error(str(e))
+        print(f"搜索公众号错误: {err_text}")
+        if _is_auth_invalid_error(err_text):
+            try:
+                from core.wechat_auth_service import get_wechat_auth
+                item = get_wechat_auth(session, owner_id=_owner(current_user))
+                if item:
+                    item.token = ""
+                    item.cookie = ""
+                    session.commit()
+            except Exception:
+                pass
+            msg = f"搜索公众号失败,请重新扫码授权！（{err_text}）"
+        else:
+            msg = f"搜索公众号失败: {err_text}"
         raise HTTPException(
             status_code=status.HTTP_201_CREATED,
             detail=error_response(
                 code=50001,
-                message=f"搜索公众号失败,请重新扫码授权！",
+                message=msg,
             )
         )
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 @router.get("", summary="获取公众号列表")
 async def get_mps(
@@ -60,7 +132,7 @@ async def get_mps(
     session = DB.get_session()
     try:
         from core.models.feed import Feed
-        query = session.query(Feed)
+        query = session.query(Feed).filter(Feed.owner_id == _owner(current_user))
         if kw:
             query = query.filter(Feed.mp_name.ilike(f"%{kw}%"))
         total = query.count()
@@ -101,7 +173,10 @@ async def update_mps(
     session = DB.get_session()
     try:
         from core.models.feed import Feed
-        mp = session.query(Feed).filter(Feed.id == mp_id).first()
+        mp = session.query(Feed).filter(
+            Feed.id == mp_id,
+            Feed.owner_id == _owner(current_user)
+        ).first()
         if not mp:
            return error_response(
                     code=40401,
@@ -145,12 +220,15 @@ async def update_mps(
 @router.get("/{mp_id}", summary="获取公众号详情")
 async def get_mp(
     mp_id: str,
-    # current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ):
     session = DB.get_session()
     try:
         from core.models.feed import Feed
-        mp = session.query(Feed).filter(Feed.id == mp_id).first()
+        mp = session.query(Feed).filter(
+            Feed.id == mp_id,
+            Feed.owner_id == _owner(current_user)
+        ).first()
         if not mp:
             raise HTTPException(
                 status_code=status.HTTP_201_CREATED,
@@ -210,13 +288,20 @@ async def add_mp(
         from core.models.feed import Feed
         import time
         now = datetime.now()
+        owner_id = _owner(current_user)
         
         import base64
-        mpx_id = base64.b64decode(mp_id).decode("utf-8")
+        try:
+            mpx_id = base64.b64decode(mp_id).decode("utf-8")
+        except Exception:
+            mpx_id = mp_id
         local_avatar_path = f"{save_avatar_locally(avatar)}"
         
         # 检查公众号是否已存在
-        existing_feed = session.query(Feed).filter(Feed.faker_id == mp_id).first()
+        existing_feed = session.query(Feed).filter(
+            Feed.faker_id == mp_id,
+            Feed.owner_id == owner_id
+        ).first()
         
         if existing_feed:
             # 更新现有记录
@@ -227,7 +312,8 @@ async def add_mp(
         else:
             # 创建新的Feed记录
             new_feed = Feed(
-                id=f"MP_WXS_{mpx_id}",
+                id=f"MP_WXS_{owner_id}_{mpx_id}",
+                owner_id=owner_id,
                 mp_name=mp_name,
                 mp_cover= local_avatar_path,
                 mp_intro=mp_intro,
@@ -279,7 +365,12 @@ async def delete_mp(
     session = DB.get_session()
     try:
         from core.models.feed import Feed
-        mp = session.query(Feed).filter(Feed.id == mp_id).first()
+        from core.models.article import Article
+        owner_id = _owner(current_user)
+        mp = session.query(Feed).filter(
+            Feed.id == mp_id,
+            Feed.owner_id == owner_id
+        ).first()
         if not mp:
             raise HTTPException(
                 status_code=status.HTTP_201_CREATED,
@@ -289,6 +380,10 @@ async def delete_mp(
                 )
             )
         
+        session.query(Article).filter(
+            Article.mp_id == mp_id,
+            Article.owner_id == owner_id
+        ).delete(synchronize_session=False)
         session.delete(mp)
         session.commit()
         return success_response({

@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
+
 cd /app/
-source install.sh
-python3 main.py -job True -init True
+exec bash script/deploy.sh container-start "$@"

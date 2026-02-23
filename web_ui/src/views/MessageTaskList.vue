@@ -161,10 +161,6 @@ const handleEdit = (id: number) => {
   router.push(`/message-tasks/edit/${id}`)
 }
 
-const handleView = (id: number) => {
-  router.push(`/message-tasks/detail/${id}`)
-}
-
 const handleDelete = async (id: number) => {
   Modal.confirm({
     title: '确认删除',
@@ -316,17 +312,20 @@ onMounted(() => {
 
 .header {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
   margin-bottom: 20px;
 }
 
 .header h2 {
-  flex: 1;
+  flex: 1 1 220px;
+  min-width: 180px;
 }
 
 .header .arco-btn {
-  margin-left: 10px;
+  margin-left: 0;
 }
 
 h2 {

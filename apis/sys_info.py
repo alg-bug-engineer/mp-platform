@@ -31,7 +31,7 @@ async def get_base_info() -> Dict[str, Any]:
             'core_version': CORE_VERSION,
             "ui":{
                 "name": cfg.get("server.name",""),
-                "web_name": cfg.get("server.web_name","WeRss公众号订阅平台"),
+                "web_name": cfg.get("server.web_name","商业化内容创作平台"),
             }
         }
         return success_response(data=base_info)

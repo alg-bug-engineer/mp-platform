@@ -20,3 +20,5 @@ doc2pdf/*.docx
 doc2pdf/*.pdf
 demo.txt
 test.yaml
+# local deploy secrets
+.env.deploy

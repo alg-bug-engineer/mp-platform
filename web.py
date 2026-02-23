@@ -18,7 +18,9 @@ from apis.sys_info import router as sys_info_router
 from apis.tags import router as tags_router
 from apis.export import router as export_router
 from apis.tools import router as tools_router
+from apis.ai import router as ai_router
 from apis.github_update import router as github_router
+from apis.billing import router as billing_router
 from views import router as views_router
 import apis
 import os
@@ -56,8 +58,7 @@ app.add_middleware(
 async def add_custom_header(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Version"] = VERSION
-    response.headers["X-Powered-By"] = "Rachel"
-    response.headers["GITHUB"] = "https://github.com/rachelos/we-mp-rss"
+    response.headers["X-Powered-By"] = "Content Platform"
     response.headers["Server"] = cfg.get("app_name", "WeRSS")
     return response
 # 创建API路由分组
@@ -72,7 +73,9 @@ api_router.include_router(sys_info_router)
 api_router.include_router(tags_router)
 api_router.include_router(export_router)
 api_router.include_router(tools_router)
+api_router.include_router(ai_router)
 api_router.include_router(github_router)
+api_router.include_router(billing_router)
 
 resource_router = APIRouter(prefix="/static")
 resource_router.include_router(res_router)

@@ -78,16 +78,23 @@
     </template>
   </a-drawer>
 
-  <a-drawer id="article-modal" v-model:visible="articleModalVisible" title="WeRss" placement="left" width="100vw"
+  <a-drawer id="article-modal" v-model:visible="articleModalVisible" title="Content Studio" placement="left" width="100vw"
     :footer="false" :fullscreen="false">
     <div style="padding: 20px; overflow-y: auto;clear:both;">
       <div>
         <h2>{{ currentArticle.title }}</h2>
       </div>
       <div style="margin-top: 20px; color: var(--color-text-3); text-align: left">
-        <a-link :href="currentArticle.url" target="_blank">查看原文</a-link>
+        <a-link v-if="currentArticle.url" :href="currentArticle.url" target="_blank">查看原文</a-link>
+        <span v-else style="margin-right: 8px;">原文链接缺失</span>
         更新时间 ：{{ currentArticle.time }}
       </div>
+      <a-alert v-if="!currentArticle.has_content" type="warning" style="margin: 12px 0;">
+        {{ currentArticle.content_tip || '正文暂未抓取，可点击“抓取全文”后重试。' }}
+        <template #action>
+          <a-button type="primary" size="mini" :loading="contentFetching" @click="manualFetchArticleContent">抓取全文</a-button>
+        </template>
+      </a-alert>
       <div v-html="currentArticle.content"></div>
       <div style="margin-top: 20px; color: var(--color-text-3); text-align: right">
         {{ currentArticle.time }}
@@ -109,7 +116,7 @@ const formatDate = (date: string | Date) => {
 }
 import { Avatar } from '@/utils/constants'
 import { ref, onMounted } from 'vue'
-import { getArticles, getArticleDetail } from '@/api/article'
+import { getArticles, getArticleDetail, fetchArticleContent } from '@/api/article'
 import { getSubscriptions } from '@/api/subscription'
 import { Message } from '@arco-design/web-vue'
 import { ProxyImage } from '@/utils/constants'
@@ -165,13 +172,13 @@ const fetchArticles = async (isLoadMore = false) => {
       articles.value = [...articles.value, ...(res.list || []).map(item => ({
         ...item,
         mp_name: item.mp_name || item.account_name || '未知公众号',
-        url: item.url || "https://mp.weixin.qq.com/s/" + item.id
+        url: item.url || `/views/article/${item.id}?auto_fetch=1`
       }))]
     } else {
       articles.value = (res.list || []).map(item => ({
         ...item,
         mp_name: item.mp_name || item.account_name || '未知公众号',
-        url: item.url || "https://mp.weixin.qq.com/s/" + item.id
+        url: item.url || `/views/article/${item.id}?auto_fetch=1`
       }))
     }
 
@@ -199,17 +206,21 @@ const handleSearch = () => {
   fetchArticles()
 }
 const processedContent = (record: any) => {
-  return ProxyImage(record.content)
+  return ProxyImage(record.content || '')
 }
+const contentFetching = ref(false)
 const viewArticle = async (record: any) => {
   loading.value = true
   try {
-    const article = await getArticleDetail(record.id)
+    const article = await getArticleDetail(record.id, 0, true)
     currentArticle.value = {
+      id: article.id,
       title: article.title,
       content: processedContent(article),
       time: formatDateTime(article.created_at),
-      url: article.url
+      url: article.url,
+      has_content: !!article.has_content,
+      content_tip: article.content_tip || ''
     }
     articleModalVisible.value = true
   } catch (error) {
@@ -221,13 +232,36 @@ const viewArticle = async (record: any) => {
 }
 
 const currentArticle = ref({
+  id: '',
   title: '',
   content: '',
   time: '',
-  url: ''
+  url: '',
+  has_content: true,
+  content_tip: ''
 })
 
 const articleModalVisible = ref(false)
+
+const manualFetchArticleContent = async () => {
+  if (!currentArticle.value.id) return
+  contentFetching.value = true
+  try {
+    const article = await fetchArticleContent(currentArticle.value.id)
+    currentArticle.value.content = processedContent(article)
+    currentArticle.value.has_content = !!article.has_content
+    currentArticle.value.content_tip = article.content_tip || ''
+    if (currentArticle.value.has_content) {
+      Message.success('正文抓取成功')
+    } else {
+      Message.warning(article.fetch_message || '未抓取到正文，请直接查看原文')
+    }
+  } catch (e: any) {
+    Message.error(String(e || '抓取全文失败'))
+  } finally {
+    contentFetching.value = false
+  }
+}
 
 const fullLoading = ref(false)
 const loadingMore = ref(false)

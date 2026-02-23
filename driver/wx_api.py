@@ -40,6 +40,7 @@ class WeChatAPI:
         # 状态管理
         self._islogin=False
         self.is_logged_in = False
+        self.last_login_error = ""
         self.fingerprint = self._generate_uuid()
         self.session = requests.Session()
         self.token = None
@@ -83,6 +84,7 @@ class WeChatAPI:
         """
         self.__init__()
         if self.check_lock():
+            self.last_login_error = "微信公众平台登录脚本正在运行，请勿重复运行"
             print_warning("微信公众平台登录脚本正在运行，请勿重复运行")
             return {
                 'code': None,
@@ -102,6 +104,7 @@ class WeChatAPI:
                 qr_info = self._extract_qr_info(response.text)
                 
                 if qr_info:
+                    self.last_login_error = ""
                     # 生成二维码图片
                     self._generate_qr_image(qr_info['qr_url'])
                     self.set_lock()
@@ -116,6 +119,7 @@ class WeChatAPI:
                         'msg': '请使用微信扫描二维码登录'
                     }
                 else:
+                    self.last_login_error = '获取二维码失败'
                     return {
                         'code': None,
                         'is_exists': False,
@@ -124,6 +128,7 @@ class WeChatAPI:
                     
             except Exception as e:
                 logger.error(f"获取二维码失败: {str(e)}")
+                self.last_login_error = f'获取二维码失败: {str(e)}'
                 return {
                     'code': None,
                     'is_exists': False,

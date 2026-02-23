@@ -11,6 +11,7 @@ class MessageTask(Base):
     
     # 定义 id 字段，作为主键，同时创建索引
     id = Column(String(255), primary_key=True, index=True)
+    owner_id = Column(String(50), index=True)
     # 定义消息类型字段，不允许为空
     message_type = Column(Integer, nullable=False)
     # 定义消息内容字段，使用 JSON 类型存储

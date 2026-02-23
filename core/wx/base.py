@@ -142,9 +142,26 @@ class WxGather:
                     self.articles.append(art)
 
     #通过公众号码平台接口查询公众号
-    def search_Biz(self,kw:str="",limit=10,offset=0):
-
-        self.get_token()
+    def search_Biz(
+        self,
+        kw: str = "",
+        limit: int = 10,
+        offset: int = 0,
+        token: str = "",
+        cookie: str = "",
+        user_agent: str = "",
+    ):
+        # 优先使用调用方传入的授权，避免多用户场景下依赖全局 wx.lic
+        if token and cookie:
+            self.token = str(token).strip()
+            self.cookies = str(cookie).strip()
+            self.user_agent = str(user_agent or random.choice(USER_AGENTS)).strip()
+            self.headers = {
+                "Cookie": self.cookies,
+                "User-Agent": self.user_agent,
+            }
+        else:
+            self.get_token()
         url = "https://mp.weixin.qq.com/cgi-bin/searchbiz"
         params = {
             "action": "search_biz",

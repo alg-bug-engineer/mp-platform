@@ -47,14 +47,23 @@
     </div>
     
     {% if article.description %}
-    <div style="background: #f8f9fa; padding: 1rem; border-radius: 4px; border-left: 4px solid #667eea; margin-bottom: 1rem;">
+    <div style="background: #f8f9fa; padding: 1rem; border-radius: 4px; border-left: 4px solid #9ca3af; margin-bottom: 1rem;">
         <strong>摘要：</strong> {{article.description}}
     </div>
     {% endif %}
 </div>
 <!-- 文章内容 -->
 <div class="article-content" style="clear: both;">
-        <p class="text-muted mt-2"> {{article.content}}</p>
+        {% if article.has_content %}
+        <div class="text-muted mt-2">{{article.content}}</div>
+        {% else %}
+        <div class="content-missing-tip">
+            {{article.content_tip}}
+        </div>
+        <div class="fetch-actions">
+            <a href="{{article.retry_url}}" class="btn btn-retry">↻ 重新抓取正文</a>
+        </div>
+        {% endif %}
         <p style="margin-top: 1rem;">
             <a href="{{article.url}}" target="_blank" class="btn" rel="noopener noreferrer">
                 🔗 原文链接

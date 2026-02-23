@@ -8,14 +8,27 @@ from core.config import cfg
 from core.auth import pwd_context
 import time
 import os
+from datetime import datetime
 from core.print import print_info, print_error
+from core.wechat_auth_service import migrate_global_auth_to_owner
 def init_user(_db: Db):
     try:
       username,password=os.getenv("USERNAME", "admin"),os.getenv("PASSWORD", "admin@123")
       session=_db.get_session()
+      import uuid
       session.add(User(
-          id=0,
+          id=str(uuid.uuid4()),
           username=username,
+          phone=username if str(username).isdigit() else None,
+          role="admin",
+          permissions='["admin"]',
+          plan_tier="premium",
+          monthly_ai_quota=999999,
+          monthly_ai_used=0,
+          monthly_image_quota=999999,
+          monthly_image_used=0,
+          quota_reset_at=datetime.now(),
+          nickname="系统管理员",
           password_hash=pwd_context.hash(password),
           ))
       session.commit()
@@ -38,6 +51,12 @@ def sync_models():
 def init():
     sync_models()
     init_user(DB)
+    try:
+        session = DB.get_session()
+        result = migrate_global_auth_to_owner(session, owner_id="admin", overwrite=False)
+        print_info(f"微信授权迁移结果: {result}")
+    except Exception as e:
+        print_error(f"微信授权迁移失败: {e}")
 
 if __name__ == '__main__':
     init()

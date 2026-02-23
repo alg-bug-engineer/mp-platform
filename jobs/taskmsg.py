@@ -4,7 +4,7 @@ from core.config import cfg
 from core.models import MessageTask
 DB = Db()
 DB.init(cfg.get("db"))
-def get_message_task(job_id:Union[str, list]=None) -> list[MessageTask]:
+def get_message_task(job_id:Union[str, list]=None, owner_id: str = None) -> list[MessageTask]:
 
     """
     获取消息任务详情
@@ -20,6 +20,8 @@ def get_message_task(job_id:Union[str, list]=None) -> list[MessageTask]:
         # 手动过期所有对象
         session.expire_all()
         query=session.query(MessageTask).filter(MessageTask.status==1)
+        if owner_id:
+            query = query.filter(MessageTask.owner_id == owner_id)
         if job_id:
             if isinstance(job_id, list):
                 query=query.filter(MessageTask.id.in_(job_id))

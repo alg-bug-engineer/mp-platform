@@ -82,15 +82,6 @@
         <a-descriptions-item label="最新版本">
           <template #label> <cloud-download-outlined /> 最新版本 </template>
           {{ sysInfo.latest_version }}
-          <!-- 添加点击事件 -->
-          <a-button
-            v-if="sysInfo.need_update"
-            type="text"
-            size="small"
-            style="margin-left: 8px"
-            @click="openUpdateLink"
-            >立即更新</a-button
-          >
         </a-descriptions-item>
       </a-descriptions>
     </a-card>
@@ -135,11 +126,6 @@ const formatUptime = (seconds: number): string => {
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   return `${days}天 ${hours}小时 ${minutes}分钟`;
-};
-
-// 定义打开链接的函数
-const openUpdateLink = () => {
-  window.open("https://github.com/rachelos/we-mp-rss", "_blank");
 };
 
 onMounted(async () => {

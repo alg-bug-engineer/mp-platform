@@ -10,7 +10,7 @@ import asyncio
 from socket import timeout
 
 # 设置环境变量
-browsers_name = os.getenv("BROWSER_TYPE", "firefox")
+browsers_name = os.getenv("BROWSER_TYPE", "chromium")
 browsers_path = os.getenv("PLAYWRIGHT_BROWSERS_PATH", "")
 os.environ['PLAYWRIGHT_BROWSERS_PATH'] = browsers_path
 
@@ -29,6 +29,8 @@ class PlaywrightController:
     def _is_browser_installed(self, browser_name):
         """检查指定浏览器是否已安装"""
         try:
+            if not browsers_path:
+                return False
             
             # 遍历目录，查找包含浏览器名称的目录
             for item in os.listdir(browsers_path):
@@ -57,6 +59,38 @@ class PlaywrightController:
                 self.browser is not None and 
                 self.context is not None and 
                 self.page is not None)
+    def _get_browser_type(self, browser_name: str):
+        name = (browser_name or "").lower()
+        if name == "firefox":
+            return self.driver.firefox
+        if name == "webkit":
+            return self.driver.webkit
+        return self.driver.chromium
+
+    def _missing_executable(self, err: Exception) -> bool:
+        msg = str(err)
+        return (
+            "Executable doesn't exist" in msg
+            or "browser has not been downloaded" in msg.lower()
+            or "playwright was just installed or updated" in msg
+        )
+
+    def _short_error(self, err: Exception) -> str:
+        msg = str(err).strip()
+        return msg.splitlines()[0] if msg else "unknown error"
+
+    def _auto_install_enabled(self) -> bool:
+        return str(os.getenv("INSTALL", "True")).lower() in ("1", "true", "yes", "on")
+
+    def _install_browser(self, browser_name: str) -> bool:
+        try:
+            print(f"检测到浏览器 {browser_name} 未安装，尝试自动安装...")
+            subprocess.check_call([sys.executable, "-m", "playwright", "install", browser_name])
+            return True
+        except Exception as install_err:
+            print(f"自动安装浏览器失败({browser_name}): {install_err}")
+            return False
+
     def start_browser(self, headless=True, mobile_mode=False, dis_image=True, browser_name=browsers_name, language="zh-CN", anti_crawler=True):
         try:
             # 使用线程锁确保线程安全
@@ -73,15 +107,10 @@ class PlaywrightController:
                     # asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
                     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
                 self.driver = sync_playwright().start()
-        
-            # 根据浏览器名称选择浏览器类型
-            if browser_name.lower() == "firefox":
-                browser_type = self.driver.firefox
-            elif browser_name.lower() == "webkit":
-                browser_type = self.driver.webkit
-            else:
-                browser_type = self.driver.chromium  # 默认使用chromium
-            print(f"启动浏览器: {browser_name}, 无头模式: {headless}, 移动模式: {mobile_mode}, 反爬虫: {anti_crawler}")
+
+            preferred = (browser_name or browsers_name or "chromium").lower()
+            candidates = [preferred] + [name for name in ("chromium", "firefox", "webkit") if name != preferred]
+            print(f"启动浏览器: 优先={preferred}, 无头模式={headless}, 移动模式={mobile_mode}, 反爬虫={anti_crawler}")
             # 设置启动选项
             launch_options = {
                 "headless": headless
@@ -92,8 +121,35 @@ class PlaywrightController:
                 launch_options["handle_sigint"] = False
                 launch_options["handle_sigterm"] = False
                 launch_options["handle_sighup"] = False
-            
-            self.browser = browser_type.launch(**launch_options)
+
+            launch_errors = {}
+            self.browser = None
+            actual_browser = None
+            for candidate in candidates:
+                browser_type = self._get_browser_type(candidate)
+                try:
+                    self.browser = browser_type.launch(**launch_options)
+                    actual_browser = candidate
+                    break
+                except Exception as launch_err:
+                    launch_errors[candidate] = self._short_error(launch_err)
+                    if self._missing_executable(launch_err) and self._auto_install_enabled():
+                        if self._install_browser(candidate):
+                            try:
+                                self.browser = browser_type.launch(**launch_options)
+                                actual_browser = candidate
+                                break
+                            except Exception as retry_err:
+                                launch_errors[candidate] = self._short_error(retry_err)
+
+            if self.browser is None:
+                errors_text = "; ".join([f"{name}: {msg}" for name, msg in launch_errors.items()])
+                tips = (
+                    "浏览器启动失败。可执行 `playwright install chromium` 或设置 "
+                    "BROWSER_TYPE=chromium；若在容器中可设置 INSTALL=True 后重启自动安装。"
+                )
+                raise Exception(f"{tips} 详细错误: {errors_text}")
+            print(f"浏览器启动成功: {actual_browser}")
             
             # 设置浏览器语言为中文
             context_options = {
@@ -123,10 +179,8 @@ class PlaywrightController:
             return self.page
         except Exception as e:
             print(f"浏览器启动失败: {str(e)}")
-            tips="Docker环境;您可以设置环境变量INSTALL=True并重启Docker自动安装浏览器环境;如需要切换浏览器可以设置环境变量BROWSER_TYPE=firefox 支持(firefox,webkit,chromium),开发环境请手工安装"
-            print(tips)
             self.cleanup()
-            raise Exception(tips)
+            raise
         
     def string_to_json(self, json_string):
         try:
@@ -329,8 +383,12 @@ class PlaywrightController:
                 self.context.close()
             if hasattr(self, 'browser') and self.browser:
                 self.browser.close()
-            if hasattr(self, 'playwright') and self.driver:
+            if hasattr(self, 'driver') and self.driver:
                 self.driver.stop()
+            self.page = None
+            self.context = None
+            self.browser = None
+            self.driver = None
             self.isClose = True
         except Exception as e:
             print(f"资源清理失败: {str(e)}")

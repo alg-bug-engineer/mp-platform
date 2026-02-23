@@ -14,14 +14,40 @@ from apis.base import format_search_kw
 from core.lax.template_parser import TemplateParser
 from views.config import base
 from driver.wxarticle import Web
-from core.cache import cache_view, clear_cache_pattern, data_cache
+from core.config import cfg
 # 创建路由器
 router = APIRouter(tags=["文章详情"])
+
+
+def _fetch_article_content(url: str) -> tuple[str, str]:
+    link = (url or "").strip()
+    if not link:
+        return "", "文章缺少原文链接，无法抓取正文"
+    try:
+        mode = str(cfg.get("gather.content_mode", "web")).lower()
+        content = ""
+        if mode == "web":
+            info = Web.get_article_content(link)
+            content = (info or {}).get("content", "") or ""
+        else:
+            from core.wx.base import WxGather
+            content = WxGather().Model().content_extract(link) or ""
+        text = (content or "").strip()
+        if not text:
+            return "", "正文尚未采集成功，请先检查扫码授权状态后重试"
+        if text == "DELETED":
+            return "", "原文已删除或不可访问"
+        return text, ""
+    except Exception as e:
+        return "", f"抓取正文失败: {e}"
+
+
 @router.get("/article/{article_id}", response_class=HTMLResponse, summary="文章详情页")
-@cache_view("article_detail", ttl=3600)  # 缓存1小时
 async def article_detail_view(
     request: Request,
-    article_id: str
+    article_id: str,
+    auto_fetch: bool = Query(True, description="正文为空时自动尝试抓取"),
+    retry_fetch: bool = Query(False, description="手动触发正文重试抓取")
 ):
     """
     文章详情页面
@@ -44,6 +70,17 @@ async def article_detail_view(
         if not article.is_read:
             article.is_read = 1
             session.commit()
+
+        fetch_attempted = False
+        fetch_error = ""
+        if not (article.content or "").strip() and (auto_fetch or retry_fetch):
+            fetch_attempted = True
+            content, fetch_error = _fetch_article_content(article.url or "")
+            if content:
+                article.content = content
+                session.commit()
+                session.refresh(article)
+                fetch_error = ""
         
         # 获取相关文章（同公众号的其他文章）
         related_articles = session.query(Article).filter(
@@ -76,6 +113,16 @@ async def article_detail_view(
             }
             related_list.append(rel_data)
         
+        has_content = bool((article.content or "").strip())
+        content_tip = "正文尚未采集，可能是未抓取成功或原文不可访问。可先查看原文链接。"
+        if not has_content and retry_fetch:
+            if fetch_error:
+                content_tip = f"本次重试抓取失败：{fetch_error}"
+            elif fetch_attempted:
+                content_tip = "已触发重试抓取，但正文仍为空，请稍后再次重试。"
+        elif not has_content and fetch_attempted:
+            content_tip = "正文尚未采集，可能是未抓取成功或原文不可访问。可点击“重新抓取正文”再次尝试。"
+
         # 处理文章数据
         article_data = {
             "id": article.id,
@@ -90,6 +137,10 @@ async def article_detail_view(
             "mp_id": article.mp_id,
             "mp_cover": Web.get_image_url(feed.mp_cover) if feed else "",
             "mp_intro": feed.mp_intro if feed else "",
+            "has_content": has_content,
+            "content_tip": content_tip,
+            "retry_url": f"/views/article/{article.id}?auto_fetch=1&retry_fetch=1",
+            "retry_fetch": retry_fetch
         }
         
         # 构建面包屑

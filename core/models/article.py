@@ -3,6 +3,7 @@ class ArticleBase(Base):
     from_attributes = True
     __tablename__ = 'articles'
     id = Column(String(255), primary_key=True)
+    owner_id = Column(String(50), index=True)
     mp_id = Column(String(255))
     title = Column(String(1000))
     pic_url = Column(String(500))

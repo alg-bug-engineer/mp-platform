@@ -8,5 +8,9 @@ from .user import User
 from .message_task import MessageTask
 # 导入配置管理模型
 from .config_management import ConfigManagement
+from .ai_profile import AIProfile
+from .ai_publish_task import AIPublishTask
+from .wechat_auth import WechatAuth
+from .billing_order import BillingOrder
 # 导入基础模型
 from .base import *

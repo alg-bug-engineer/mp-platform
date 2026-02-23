@@ -174,6 +174,6 @@ def save_config():
     cfg.save_config()
     
 DEBUG=cfg.get("debug",False)
-APP_NAME=cfg.get("app_name","we-mp-rss")
+APP_NAME=cfg.get("app_name","content-studio")
 from core.base import *
 print(f"名称:{APP_NAME}\n版本:{VERSION} API_BASE:{API_BASE}")

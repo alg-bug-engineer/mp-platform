@@ -8,8 +8,12 @@
 .form-group { display: flex; flex-direction: column; }
 .form-group label { font-weight: 500; margin-bottom: 0.25rem; font-size: 0.9rem; }
 .form-control { padding: 0.75rem; border: 1px solid #ced4da; border-radius: 4px; font-size: 1rem; transition: border-color 0.3s; }
-.form-control:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1); }
+.form-control:focus { outline: none; border-color: var(--views-focus-border, #9ca3af); box-shadow: 0 0 0 2px var(--views-focus-shadow, rgba(156, 163, 175, 0.2)); }
 .search-buttons { display: flex; gap: 0.5rem; justify-content: flex-end; flex-wrap: wrap; }
+.article-title-link { color: var(--views-link-color, #6b7280); text-decoration: none; transition: color 0.2s ease; }
+.article-title-link:hover { color: var(--views-link-hover-color, #4b5563); }
+.article-meta a { color: var(--views-link-color, #6b7280); }
+.article-meta a:hover { color: var(--views-link-hover-color, #4b5563); }
 
 @media (max-width: 768px) {
     .search-form { padding: 1rem; }

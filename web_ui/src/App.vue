@@ -1,395 +1,585 @@
 <template>
-  <a-layout class="app-container">
-    <!-- 头部 -->
-    <a-layout-header class="app-header" v-if="route.path !== '/login'">
-      <div class="header-left">
-        <div class="logo">
-          <img :src="logo" alt="avatar" :width="60" style="margin-right:1rem;">
-          <router-link to="/">{{ appTitle }}</router-link>
-          <a-tooltip v-if="hasLogined" :content="!haswxLogined ? '未授权，请扫码登录' : '点我扫码授权'" position="bottom">
-            <icon-scan @click="showAuthQrcode()" :style="{ marginLeft: '10px', cursor: 'pointer', color: !haswxLogined ? '#f00' : '#000' }"/>
-          </a-tooltip>
-        </div>
-        <a-space>
-            <a-select :defaultValue="currentLanguage" v-model:value="currentLanguage" @change="handleLanguageChange" >
-              <a-option value="">禁用</a-option>
-              <a-option value="chinese_simplified">简体中文</a-option>
-              <a-option value="chinese_traditional">繁體中文</a-option>
-              <a-option value="english" selected="selected">English</a-option>
-              <a-option value="russian">Русский язык</a-option>
-              <a-option value="corsican">hinaassicurasol</a-option>
-              <a-option value="guarani">ondoho</a-option>
-              <a-option value="kinyarwanda">Kinyarwanda</a-option>
-              <a-option value="hausa">dictionary variant</a-option>
-              <a-option value="norwegian">Norge</a-option>
-              <a-option value="dutch">nederlands</a-option>
-              <a-option value="yoruba">Yoruba</a-option>
-              <a-option value="gongen">गोंगेन हें नांव</a-option>
-              <a-option value="latin">Latina</a-option>
-              <a-option value="nepali">नेपालीName</a-option>
-              <a-option value="french">Français</a-option>
-              <a-option value="czech">český</a-option>
-              <a-option value="hawaiian">panekeʻhaka</a-option>
-              <a-option value="georgian">ჯორჯიანიName</a-option>
-             
-              <a-option value="serbian">Српски</a-option>
-              <a-option value="persian">Persian</a-option>
-              <a-option value="bhojpuri">हमार कपार दर्द करता।</a-option>
-              <a-option value="hindi">हिन्दी</a-option>
-              <a-option value="belarusian">БеларускаяName</a-option>
-              <a-option value="kazakh">қазақ</a-option>
-              <a-option value="swahili">Kiswahili</a-option>
-              <a-option value="icelandic">ÍslandName</a-option>
-              <a-option value="yiddish">ייַדיש</a-option>
-              <a-option value="twi">Ma frɛ</a-option>
-              <a-option value="irish">Íris</a-option>
-              <a-option value="gujarati">ગુજરાતી</a-option>
-              <a-option value="khmer">ភាសា&ZeroWidthSpace;ខ្មែរName</a-option>
-              <a-option value="slovak">Slovenská</a-option>
-              <a-option value="hebrew">היברית</a-option>
-              <a-option value="kannada">ಕನ್ನಡ್Name</a-option>
-              <a-option value="hungarian">magyar</a-option>
-              <a-option value="tamil">தாமில்</a-option>
-              <a-option value="arabic">بالعربية</a-option>
-              <a-option value="bengali">বেঙ্গালী</a-option>
-              <a-option value="azerbaijani">azerbaijani</a-option>
-              <a-option value="samoan">lifiava</a-option>
-              <a-option value="afrikaans">afrikaans</a-option>
-              <a-option value="indonesian">IndonesiaName</a-option>
-              <a-option value="danish">dansk</a-option>
-              <a-option value="shona">Shona</a-option>
-              <a-option value="bambara">Bamanankan</a-option>
-              <a-option value="lithuanian">Lietuva</a-option>
-              <a-option value="vietnamese">Tiếng Việt</a-option>
-              <a-option value="maltese">Malti</a-option>
-              <a-option value="turkmen">Türkmençe</a-option>
-              <a-option value="assamese">assamese</a-option>
-              <a-option value="catalan">català</a-option>
-              <a-option value="singapore">සිංගාපුර්</a-option>
-              <a-option value="cebuano">cebuano</a-option>
-              <a-option value="sanskrit">Sanskrit</a-option>
-              <a-option value="polish">Polski</a-option>
-              <a-option value="galician">galico</a-option>
-              <a-option value="latvian">latviešu</a-option>
-              <a-option value="ukrainian">Україна</a-option>
-              <a-option value="tatar">Татар</a-option>
-              <a-option value="scottish_gaelic">Gàidhlig na h-Alba</a-option>
-              <a-option value="welsh">Iaith Weleg</a-option>
-              <a-option value="japanese">日本語</a-option>
-              <a-option value="filipino">Pilipino</a-option>
-              <a-option value="aymara">aymara.</a-option>
-              <a-option value="lao">ກະຣຸນາ</a-option>
-              <a-option value="telugu">తెలుగుName</a-option>
-              <a-option value="romanian">Română</a-option>
-              <a-option value="haitian_creole">Kreyòl ayisyen</a-option>
-              <a-option value="dogrid">कुकुरमुत्ता</a-option>
-              <a-option value="swedish">Svenska</a-option>
-              <a-option value="maithili">मरातिलीName</a-option>
-              <a-option value="thai">คนไทย</a-option>
-              <a-option value="armenian">Արմենյան</a-option>
-              <a-option value="burmese">ဗာရမ်</a-option>
-              <a-option value="pashto">پښتوName</a-option>
-              <a-option value="hmong">hmong</a-option>
-              <a-option value="dhivehi">ދިވާރީވް</a-option>
-              <a-option value="luxembourgish">LëtzebuergeschName</a-option>
-              <a-option value="sindhi">سنڌي</a-option>
-              <a-option value="kurdish">Kurdî</a-option>
-              <a-option value="turkish">Türkçe</a-option>
-              <a-option value="macedonian">Македонски</a-option>
-              <a-option value="bulgarian">български</a-option>
-              <a-option value="malay">Malay</a-option>
-              <a-option value="luganda">luganda</a-option>
-              <a-option value="marathi">मराठीName</a-option>
-              <a-option value="estonian">eesti keel</a-option>
-              <a-option value="malayalam">മലമാലം</a-option>
-              <a-option value="deutsch">Deutsch</a-option>
-              <a-option value="slovene">slovenščina</a-option>
-              <a-option value="urdu">اوردو</a-option>
-              <a-option value="portuguese">português</a-option>
-              <a-option value="igbo">igbo</a-option>
-              <a-option value="kurdish_sorani">کوردی سۆرانی</a-option>
-              <a-option value="oromo">adeta</a-option>
-              <a-option value="greek">ελληνικά</a-option>
-              <a-option value="spanish">Español</a-option>
-              <a-option value="frisian">frysk</a-option>
-              <a-option value="somali">Soomaali</a-option>
-              <a-option value="amharic">amharic</a-option>
-              <a-option value="nyanja">potakuyan</a-option>
-              <a-option value="punjabi">ਪੰਜਾਬੀName</a-option>
-              <a-option value="basque">baskoa</a-option>
-              <a-option value="italian">italiano</a-option>
-              <a-option value="albanian">albanian</a-option>
-              <a-option value="korean">한국어</a-option>
-              <a-option value="tajik">ТаjikӣName</a-option>
-              <a-option value="finnish">suomi</a-option>
-              <a-option value="kyrgyz">Кыргыз тили</a-option>
-              <a-option value="ewe">Eʋegbe</a-option>
-              <a-option value="croatian">hrvatski</a-option>
-              <a-option value="creole">a n:n</a-option>
-              <a-option value="quechua">Quechua</a-option>
-              <a-option value="bosnian">bosnian</a-option>
-              <a-option value="maori">Maori</a-option>
-            </a-select>
-        </a-space>
-      </div>
-      <div class="header-right" v-if="hasLogined">
-        <a-link href="/views/home" target="_blank" style="margin-right: 20px;">Views</a-link>
-        <a-link href="/api/docs" target="_blank" style="margin-right: 20px;">Docs</a-link>
-        <a-link href="https://gitee.com/rachel_os/we-mp-rss" target="_blank" style="margin-right: 20px;">Gitee</a-link>
-        <a-link href="https://github.com/rachelos/we-mp-rss" target="_blank" style="margin-right: 20px;">GitHub</a-link>
-        <a-tooltip content="GitHub或者Google账户注册登录，获得首月5美元奖励。注册180+天的GitHub账户还可以解锁每月5美元的额度赠送。" position="bottom">
-          <a-link href="https://console.run.claw.cloud/signin?link=FJ0VXS42W2P9" target="_blank"
-            style="margin-right: 20px;">ClawCloud</a-link>
-        </a-tooltip>
-        <a-tooltip content="如果您需要部署此项目，建议采用腾讯云服务器，您懂得" position="bottom">
-          <a-link
-            href="https://cloud.tencent.com/act/cps/redirect?redirect=2446&cps_key=f8ce741e7b24cd68141ab2115122ea94&from=console"
-            target="_blank" style="margin-right: 20px;">云部署</a-link>
-        </a-tooltip>
-        <a-tooltip content="您的支持是作者的最大动力，来一杯咖啡吧" position="bottom">
-          <a-link @click="showSponsorModal" style="margin-right: 20px; cursor: pointer;" type="text">支持</a-link>
-        </a-tooltip>
-        <a-link href="https://www.paypal.com/ncp/payment/PUA72WYLAV5KW" target="_blank"
-          style="margin-right: 20px;">赞助</a-link>
+  <a-layout class="app-shell">
+    <a-layout-content class="content">
+      <router-view v-if="isAuthPage" />
 
+      <div v-else class="workspace-main" :class="{ collapsed: navCollapsed }">
+        <aside class="workspace-sidebar">
+          <div class="sidebar-top">
+            <button type="button" class="brand-zone" @click="navigateTo('/workspace/content')">
+              <img :src="brandLogo" alt="Content Studio" class="brand-logo" />
+              <div v-if="!navCollapsed" class="brand-text">
+                <div class="brand-title">{{ appTitle }}</div>
+                <div class="brand-subtitle">自媒体一站式创作平台</div>
+              </div>
+            </button>
 
-
-        <a-dropdown position="br" trigger="click">
-          <div class="user-info">
-            <a-avatar :size="36">
-              <img v-if="userInfo.avatar" :src="userInfo.avatar" alt="avatar">
-              <icon-user v-else />
-            </a-avatar>
-            <span class="username">{{ userInfo.username }}</span>
+            <a-button class="collapse-btn" shape="circle" size="small" @click="toggleSidebar">
+              <template #icon>
+                <component :is="navCollapsed ? IconMenuUnfold : IconMenuFold" />
+              </template>
+            </a-button>
           </div>
-          <template #content>
-            <a-doption @click="goToEditUser">
-              <template #icon><icon-user /></template>
-              个人中心
-            </a-doption>
-            <a-doption @click="goToChangePassword">
-              <template #icon><icon-lock /></template>
-              修改密码
-            </a-doption>
-            <a-doption @click="showAuthQrcode">
-              <template #icon><icon-scan /></template>
-              扫码授权
-            </a-doption>
-            <a-doption @click="handleLogout">
-              <template #icon><icon-user /></template>
-              退出登录
-            </a-doption>
-          </template>
-        </a-dropdown>
-        <WechatAuthQrcode ref="qrcodeRef" />
-        <a-modal v-model:visible="sponsorVisible" title="感谢支持" :footer="false" :style="{ zIndex: 1000 }" unmount-on-close>
-          <div style="text-align: center;">
-            <p>如果您觉得这个项目对您有帮助,请给Rachel来一杯Coffee吧~ </p>
-            <img src="@/assets/images/sponsor.jpg" alt="赞赏码" style="max-width: 300px; margin-top: 20px;">
-            <p>您打赏的金额将用于维护项目的运行成本，感谢您的支持！</p>
-            <p>打赏后可以发送单号到<a href="mailto:rachelos@qq.com">rachelos@qq.com</a></p>
+
+          <div class="sidebar-status">
+            <a-tag :color="planColor" class="status-tag">{{ userPlanLabel }}</a-tag>
+            <a-tag :color="wxAuthReady ? 'green' : 'orange'" class="status-tag">
+              {{ wxAuthLabel }}
+            </a-tag>
           </div>
-        </a-modal>
-      </div>
-    </a-layout-header>
 
-    <a-layout>
+          <nav class="sidebar-nav">
+            <section v-for="group in visibleNavGroups" :key="group.key" class="nav-group">
+              <div v-if="!navCollapsed" class="group-title">{{ group.label }}</div>
+              <div class="group-items">
+                <a-tooltip
+                  v-for="item in group.items"
+                  :key="item.key"
+                  :content="`${item.label} · ${item.hint}`"
+                  :disabled="!navCollapsed"
+                  position="right"
+                >
+                  <button
+                    type="button"
+                    class="sidebar-item"
+                    :class="{ active: item.active }"
+                    @click="navigateToWithQuery(item.path, item.query)"
+                  >
+                    <span class="item-icon">
+                      <component :is="item.icon" />
+                    </span>
+                    <span v-if="!navCollapsed" class="item-copy">
+                      <span class="item-label">{{ item.label }}</span>
+                      <span class="item-hint">{{ item.hint }}</span>
+                    </span>
+                  </button>
+                </a-tooltip>
+              </div>
+            </section>
+          </nav>
 
-      <!-- 主内容区 -->
-      <a-layout>
-        <a-layout-content class="app-content">
+          <div class="sidebar-actions">
+            <a-tooltip :content="wxAuthReady ? '已授权' : '扫码授权公众号'" :disabled="!navCollapsed" position="right">
+              <a-button
+                :long="!navCollapsed"
+                :type="wxAuthReady ? 'secondary' : 'primary'"
+                size="small"
+                :disabled="wxAuthReady"
+                @click="showAuthQrcode"
+              >
+                <template #icon>
+                  <IconApps />
+                </template>
+                <span v-if="!navCollapsed">{{ wxAuthReady ? '已授权' : '扫码授权公众号' }}</span>
+              </a-button>
+            </a-tooltip>
+
+            <a-dropdown>
+              <a-button class="user-btn" :long="!navCollapsed" size="small">
+                <template #icon>
+                  <IconUser />
+                </template>
+                <span v-if="!navCollapsed">{{ userInfo.nickname || userInfo.username || '未登录' }}</span>
+              </a-button>
+              <template #content>
+                <a-doption @click="navigateTo('/edit-user')">个人中心</a-doption>
+                <a-doption @click="navigateTo('/change-password')">修改密码</a-doption>
+                <a-doption @click="doLogout">退出登录</a-doption>
+              </template>
+            </a-dropdown>
+          </div>
+        </aside>
+
+        <section class="workspace-display">
           <router-view />
-        </a-layout-content>
-      </a-layout>
-    </a-layout>
+        </section>
+      </div>
+    </a-layout-content>
+
+    <WechatAuthQrcode ref="qrcodeRef" @success="handleAuthSuccess" />
   </a-layout>
 </template>
 
 <script setup lang="ts">
-import translate from 'i18n-jsautotranslate'
-import { ref,watchEffect, computed, onMounted, watch, provide } from 'vue'
-import { Modal } from '@arco-design/web-vue/es/modal'
-import {getSysInfo} from '@/api/sysInfo'
-const currentLanguage = ref(localStorage.getItem('language') || 'chinese_simplified');
-
-
-const handleLanguageChange = (language: string) => {
-  setCurrentLanguage(language);
-  currentLanguage.value = language;
-};
-const sponsorCount:number = parseInt(localStorage.getItem('sponsor'))|| 0
-localStorage.setItem('sponsor', (sponsorCount+1).toString())
-const sponsorVisible = ref(sponsorCount<3)
-const showSponsorModal = (e: Event) => {
-  e.preventDefault()
-  sponsorVisible.value = true
-  localStorage.setItem('sponsor',"0")
-  console.log('Sponsor modal triggered') // 添加调试日志
-}
-import { 
-  initBrowserNotification 
-} from '@/utils/browserNotification'
-import { useRouter, useRoute } from 'vue-router'
+import { computed, onMounted, provide, ref, watch, type Component } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
-import { getCurrentUser } from '@/api/auth'
-import { logout } from '@/api/auth'
+import {
+  IconApps,
+  IconBook,
+  IconCommand,
+  IconEdit,
+  IconFile,
+  IconGift,
+  IconLock,
+  IconMenuFold,
+  IconMenuUnfold,
+  IconMessage,
+  IconSettings,
+  IconTag,
+  IconUser,
+} from '@arco-design/web-vue/es/icon'
+import { getCurrentUser, getWechatAuthStatus, logout, type CurrentUser } from '@/api/auth'
 import WechatAuthQrcode from '@/components/WechatAuthQrcode.vue'
+import brandLogo from '@/assets/logo.svg'
 
+type NavNode = {
+  key: string
+  label: string
+  hint: string
+  path: string
+  group: string
+  icon: Component
+  query?: Record<string, string>
+  prefix?: boolean
+  adminOnly?: boolean
+}
+
+type NavGroup = {
+  key: string
+  label: string
+}
+
+const SIDEBAR_COLLAPSE_KEY = 'workspace:sidebar:collapsed'
+
+const groups: NavGroup[] = [
+  { key: 'content', label: '内容与创作' },
+  { key: 'billing', label: '套餐与支付' },
+  { key: 'ops', label: '运营设置' },
+  { key: 'account', label: '账号设置' },
+  { key: 'admin', label: '管理员' },
+]
+
+const nodes: NavNode[] = [
+  { key: 'content', label: '内容池', hint: '文章管理', path: '/workspace/content', group: 'content', icon: IconBook, prefix: true },
+  { key: 'subs', label: '订阅源', hint: '公众号订阅', path: '/workspace/subscriptions', group: 'content', icon: IconApps, prefix: true },
+  { key: 'studio', label: '创作中台', hint: '分析/创作/仿写', path: '/workspace/studio', group: 'content', icon: IconEdit, prefix: true },
+  { key: 'draftbox', label: '草稿箱', hint: '本地草稿', path: '/workspace/draftbox', group: 'content', icon: IconFile, prefix: true },
+
+  { key: 'bill-plan', label: '套餐选择', hint: '选择套餐并下单', path: '/workspace/billing', group: 'billing', icon: IconGift, query: { anchor: 'plans' }, prefix: true },
+  { key: 'bill-orders', label: '我的订单', hint: '支付/取消/追踪', path: '/workspace/billing', group: 'billing', icon: IconGift, query: { anchor: 'orders' }, prefix: true },
+  { key: 'bill-integration', label: '支付接入', hint: '支付系统接入', path: '/workspace/billing', group: 'billing', icon: IconGift, query: { anchor: 'integration' }, prefix: true },
+
+  { key: 'ops-msg', label: '消息任务', hint: '任务队列', path: '/workspace/ops/messages', group: 'ops', icon: IconMessage, prefix: true },
+  { key: 'ops-tags', label: '标签管理', hint: '内容分类', path: '/workspace/ops/tags', group: 'ops', icon: IconTag, prefix: true },
+  { key: 'ops-config', label: '系统配置', hint: '系统参数', path: '/workspace/ops/configs', group: 'ops', icon: IconSettings, prefix: true },
+
+  { key: 'account-profile', label: '个人中心', hint: '账号信息', path: '/edit-user', group: 'account', icon: IconUser },
+  { key: 'account-password', label: '修改密码', hint: '安全设置', path: '/change-password', group: 'account', icon: IconLock },
+
+  { key: 'admin-plans', label: '套餐管理', hint: '管理员配置', path: '/workspace/admin/plans', group: 'admin', icon: IconCommand, adminOnly: true, prefix: true },
+]
+
+const route = useRoute()
+const router = useRouter()
 const qrcodeRef = ref()
+const appTitle = computed(() => import.meta.env.VITE_APP_TITLE || 'Content Studio')
+const isAuthPage = computed(() => route.path === '/login')
+
+const userInfo = ref<CurrentUser>({
+  username: '',
+  nickname: '',
+})
+const wxAuthReady = ref(false)
+const navCollapsed = ref(localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === '1')
+
+const userPlanLabel = computed(() => {
+  if (navCollapsed.value) return userInfo.value?.plan?.tier?.toUpperCase?.() || 'FREE'
+  return userInfo.value?.plan?.label || '免费用户'
+})
+const wxAuthLabel = computed(() => {
+  if (navCollapsed.value) return wxAuthReady.value ? '已授权' : '未授权'
+  return wxAuthReady.value ? '公众号已授权' : '公众号未授权'
+})
+const isAdmin = computed(() => userInfo.value?.role === 'admin')
+const planColor = computed(() => {
+  const tier = userInfo.value?.plan?.tier || 'free'
+  if (tier === 'premium') return 'purple'
+  if (tier === 'pro') return 'orange'
+  return 'green'
+})
+
+const getQueryText = (key: string) => {
+  const value = route.query[key]
+  return Array.isArray(value) ? String(value[0] || '') : String(value || '')
+}
+
+const isNodeActive = (node: NavNode) => {
+  const pathMatch = node.prefix ? route.path.startsWith(node.path) : route.path === node.path
+  if (!pathMatch) return false
+  if (!node.query) return true
+
+  return Object.entries(node.query).every(([key, expected]) => {
+    const current = getQueryText(key)
+    if (key === 'anchor' && expected === 'plans') {
+      return !current || current === expected
+    }
+    return current === expected
+  })
+}
+
+const visibleNavGroups = computed(() => {
+  const visibleNodes = nodes.filter((node) => !node.adminOnly || isAdmin.value)
+  return groups
+    .map((group) => {
+      const items = visibleNodes
+        .filter((node) => node.group === group.key)
+        .map((node) => ({
+          ...node,
+          active: isNodeActive(node),
+        }))
+      return {
+        ...group,
+        items,
+      }
+    })
+    .filter((group) => group.items.length > 0)
+})
+
 const showAuthQrcode = () => {
+  if (wxAuthReady.value) {
+    Message.success('公众号已授权')
+    return
+  }
   qrcodeRef.value?.startAuth()
 }
+
 provide('showAuthQrcode', showAuthQrcode)
-const appTitle = computed(() => import.meta.env.VITE_APP_TITLE || '微信公众号订阅助手')
-const logo = ref("/static/logo.svg")
-const router = useRouter()
-const route = useRoute()
-const collapsed = ref(false)
-const userInfo = ref({
-  username: '',
-  avatar: ''
-})
-const haswxLogined = ref(true)
-const hasLogined = ref(false)
-const isAuthenticated = computed(() => {
-  hasLogined.value = !!localStorage.getItem('token')
-  return hasLogined.value
-})
+provide('wxAuthReady', wxAuthReady)
 
-const fetchUserInfo = async () => {
+const toggleSidebar = () => {
+  navCollapsed.value = !navCollapsed.value
+}
+
+const navigateTo = async (path: string) => {
+  const target = router.resolve(path)
+  if (target.fullPath === route.fullPath) return
   try {
-    const res = await getCurrentUser()
-    userInfo.value = res
-  } catch (error) {
-    console.error('获取用户信息失败', error)
+    await router.push(target)
+  } catch (err) {
+    console.warn('导航失败:', err)
   }
 }
 
-const fetchSysInfo = async () => {
+const navigateToWithQuery = async (path: string, query?: Record<string, string>) => {
+  const nextQuery = query ? { ...query } : {}
+  const target = router.resolve({ path, query: nextQuery })
+  if (target.fullPath === route.fullPath) return
   try {
-    const res = await getSysInfo()
-    haswxLogined.value = res?.wx?.login||false
-  } catch (error) {
-    console.error('获取系统信息失败', error)
+    await router.push(target)
+  } catch (err) {
+    console.warn('导航失败:', err)
   }
 }
 
-const handleCollapse = (val: boolean) => {
-  collapsed.value = val
+const consumeRouteNotice = () => {
+  const notice = getQueryText('notice')
+  if (notice !== 'forbidden') return
+  Message.warning('当前账号权限不足，已返回可访问页面')
+  const nextQuery: Record<string, any> = { ...route.query }
+  delete nextQuery.notice
+  delete nextQuery.target
+  router.replace({ path: route.path, query: nextQuery, hash: route.hash })
 }
 
-const handleMenuClick = (key: string) => {
-  router.push({ name: key })
+const fetchUser = async () => {
+  if (!localStorage.getItem('token')) return
+  try {
+    const data = await getCurrentUser()
+    userInfo.value = data || {}
+    const auth = await getWechatAuthStatus()
+    wxAuthReady.value = !!auth?.authorized
+  } catch {
+    // ignored
+  }
 }
 
-const goToEditUser = () => {
-  router.push({ name: 'EditUser' })
+const handleAuthSuccess = () => {
+  wxAuthReady.value = true
+  fetchUser()
 }
 
-const goToChangePassword = () => {
-  router.push({ name: 'ChangePassword' })
-}
-
-const handleLogout = async () => {
+const doLogout = async () => {
   try {
     await logout()
+  } finally {
     localStorage.removeItem('token')
-    router.push('/login')
-  } catch (error) {
-    Message.error('退出登录失败')
+    await router.push('/login')
+    Message.success('已退出登录')
   }
 }
 
-onMounted(() => {
- 
-  if (isAuthenticated.value) {
-    fetchUserInfo()
-  }
-  initBrowserNotification()
-  translatePage();
-  fetchSysInfo();
+watch(navCollapsed, (value) => {
+  localStorage.setItem(SIDEBAR_COLLAPSE_KEY, value ? '1' : '0')
 })
-import { translatePage, setCurrentLanguage } from '@/utils/translate';
 
 watch(
-  () => route.path,
+  () => route.fullPath,
   () => {
-    hasLogined.value = !!localStorage.getItem('token')
-    if (hasLogined.value) {
-      fetchUserInfo()
-    }
+    consumeRouteNotice()
+    fetchUser()
   }
 )
+
+onMounted(() => {
+  fetchUser()
+  consumeRouteNotice()
+})
 </script>
 
 <style scoped>
-.app-container {
-  min-height: 100vh;
+.app-shell {
+  height: 100vh;
+  overflow: hidden;
+  background: transparent;
 }
 
+.content {
+  height: 100vh;
+  padding: 12px;
+  width: 100%;
+  max-width: 100vw;
+  overflow: hidden;
+}
 
-.app-header {
+.workspace-main {
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr);
+  gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  height: calc(100vh - 24px);
+}
+
+.workspace-main.collapsed {
+  grid-template-columns: 88px minmax(0, 1fr);
+}
+
+.workspace-sidebar {
+  border: 1px solid #dce5f5;
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 12px;
   display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-top {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: center;
-  padding: 0 20px;
-  height: 64px;
-  background: var(--color-bg-2);
-  border-bottom: 1px solid var(--color-border);
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
-.header-left {
+.brand-zone {
+  flex: 1;
   display: flex;
   align-items: center;
-}
-
-.logo {
-  display: flex;
-  align-items: center;
-  font-size: 18px;
-  font-weight: 500;
-}
-
-.logo svg {
-  margin-right: 10px;
-  font-size: 24px;
-  color: var(--primary-color);
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-}
-
-.user-info {
-  display: flex;
-  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
   cursor: pointer;
+  padding: 0;
+  min-width: 0;
 }
 
-.username {
-  margin-left: 10px;
+.brand-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+  flex: 0 0 auto;
 }
 
-.app-content {
-  /* padding: 20px; */
-  background: var(--color-bg-1);
-  min-height: calc(100vh - 64px);
+.brand-text {
+  text-align: left;
+  min-width: 0;
 }
 
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
+.brand-title {
+  color: var(--cs-text-strong);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
+.brand-subtitle {
+  color: var(--cs-text-muted);
+  font-size: 12px;
+  line-height: 1.2;
 }
 
-@media (max-width: 720px) {
-  .app-header .header-right {
-    display: none !important;
+.collapse-btn {
+  flex: 0 0 auto;
+}
+
+.sidebar-status {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.status-tag {
+  justify-content: center;
+}
+
+.sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+
+.nav-group {
+  margin-bottom: 12px;
+}
+
+.group-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+  margin-bottom: 8px;
+  padding-left: 2px;
+}
+
+.group-items {
+  display: grid;
+  gap: 8px;
+}
+
+.sidebar-item {
+  width: 100%;
+  border: 1px solid #dbe4f2;
+  border-radius: 10px;
+  background: #ffffff;
+  text-align: left;
+  padding: 9px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.sidebar-item:hover {
+  border-color: #8fb4f8;
+  transform: translateY(-1px);
+}
+
+.sidebar-item.active {
+  border-color: #2563eb;
+  background: #eef4ff;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.12);
+}
+
+.item-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #1d4ed8;
+  flex: 0 0 auto;
+}
+
+.item-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.item-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.item-hint {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.2;
+}
+
+.workspace-main.collapsed .sidebar-item {
+  justify-content: center;
+  padding: 9px 8px;
+}
+
+.workspace-main.collapsed .sidebar-status {
+  gap: 4px;
+}
+
+.workspace-main.collapsed .status-tag {
+  font-size: 11px;
+}
+
+.sidebar-actions {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed #d7e3f7;
+}
+
+.user-btn {
+  justify-content: flex-start;
+}
+
+.workspace-main.collapsed .user-btn {
+  justify-content: center;
+}
+
+.workspace-display {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+
+@media (max-width: 1080px) {
+  .app-shell,
+  .content {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .workspace-main,
+  .workspace-main.collapsed {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .workspace-sidebar {
+    overflow: visible;
+  }
+
+  .sidebar-nav {
+    max-height: none;
+  }
+
+  .workspace-display {
+    height: auto;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 768px) {
+  .content {
+    padding: 8px;
+  }
+
+  .workspace-sidebar {
+    padding: 10px;
   }
 }
 </style>

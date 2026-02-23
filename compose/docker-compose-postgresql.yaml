@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: content-studio-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: we_mp_rss
+      POSTGRES_USER: rss_user
+      POSTGRES_PASSWORD: pass123456
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  content-studio:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: content-studio
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    env_file:
+      - ../.env.deploy
+    environment:
+      DB: postgresql://rss_user:pass123456@postgres:5432/we_mp_rss
+      USERNAME: admin
+      PASSWORD: admin@123
+      APP_NAME: content-studio
+      WEB_NAME: 商业化内容创作平台
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - postgres
+
+volumes:
+  pg_data:

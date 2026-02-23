@@ -1,7 +1,7 @@
 <style>
 .breadcrumb { background: white; padding: 1rem; border-radius: 8px; margin-bottom: 2rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-.breadcrumb a { color: #667eea; text-decoration: none; }
-.breadcrumb a:hover { text-decoration: underline; }
+.breadcrumb a { color: var(--views-link-color, #6b7280); text-decoration: none; }
+.breadcrumb a:hover { color: var(--views-link-hover-color, #4b5563); text-decoration: underline; }
 .tag-header { display: flex; align-items: start; gap: 2rem; margin-bottom: 2rem; }
 .tag-cover { width: 120px; height: 120px; border-radius: 8px; object-fit: cover; }
 .tag-info h1 { margin-bottom: 0.5rem; color: #333; }
@@ -18,8 +18,8 @@
 .article-item { border-bottom: 1px solid #e9ecef; padding-bottom: 1rem; margin-bottom: 1rem; }
 .article-item:last-child { border-bottom: none; }
 .article-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem; }
-.article-title a { color: #333; text-decoration: none; }
-.article-title a:hover { color: #667eea; }
+.article-title a { color: var(--views-link-color, #6b7280); text-decoration: none; }
+.article-title a:hover { color: var(--views-link-hover-color, #4b5563); }
 .article-meta { color: #6c757d; font-size: 0.9rem; }
 .mp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; margin-top: 1rem; }
 .mp-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: #f8f9fa; border-radius: 4px; }

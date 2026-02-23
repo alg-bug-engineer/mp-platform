@@ -4,6 +4,7 @@ class Tags(Base):
     __tablename__ = 'tags'
     # 标签唯一标识符，主键
     id = Column(String(255), primary_key=True)
+    owner_id = Column(String(50), index=True)
     # 标签名称
     name =Column(String(255))
     # 标签封面图片URL

@@ -12,6 +12,9 @@ import ConfigDetail from '../views/ConfigDetail.vue'
 import MessageTaskList from '../views/MessageTaskList.vue'
 import MessageTaskForm from '../views/MessageTaskForm.vue'
 import NovelReader from '../views/NovelReader.vue'
+import AiStudio from '../views/AiStudio.vue'
+import PlanManagement from '../views/PlanManagement.vue'
+import BillingCenter from '../views/BillingCenter.vue'
 
 const routes = [
   {
@@ -21,8 +24,17 @@ const routes = [
       {
         path: '',
         name: 'Home',
+        alias: ['/workspace/content'],
         component: ArticleList,
         meta: { requiresAuth: true }
+      },
+      {
+        path: 'workspace',
+        redirect: '/workspace/content',
+      },
+      {
+        path: 'workspace/ops',
+        redirect: '/workspace/ops/messages',
       },
       {
         path: 'change-password',
@@ -39,6 +51,7 @@ const routes = [
       {
         path: 'add-subscription',
         name: 'AddSubscription',
+        alias: ['/workspace/subscriptions'],
         component: AddSubscription,
         meta: { requiresAuth: true }
       },
@@ -55,6 +68,7 @@ const routes = [
       {
         path: 'configs',
         name: 'ConfigList',
+        alias: ['/workspace/ops/configs'],
         component: ConfigList,
         meta: { 
           requiresAuth: true,
@@ -83,6 +97,7 @@ const routes = [
       {
         path: 'message-tasks',
         name: 'MessageTaskList',
+        alias: ['/workspace/ops/messages'],
         component: MessageTaskList,
         meta: { 
           requiresAuth: true,
@@ -118,8 +133,45 @@ const routes = [
         }
       },
       {
+        path: 'ai/studio',
+        name: 'AiStudio',
+        alias: ['/workspace/studio'],
+        component: AiStudio,
+        meta: {
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'workspace/draftbox',
+        name: 'AiDraftbox',
+        component: AiStudio,
+        meta: {
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'billing',
+        name: 'BillingCenter',
+        alias: ['/workspace/billing'],
+        component: BillingCenter,
+        meta: {
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'admin/plans',
+        name: 'PlanManagement',
+        alias: ['/workspace/admin/plans'],
+        component: PlanManagement,
+        meta: {
+          requiresAuth: true,
+          permissions: ['admin']
+        }
+      },
+      {
         path: 'tags',
         name: 'TagList',
+        alias: ['/workspace/ops/tags'],
         component: () => import('@/views/TagList.vue'),
         meta: { 
           requiresAuth: true,
@@ -162,30 +214,81 @@ const routes = [
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
-  routes
+  routes,
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) return savedPosition
+    if (to.hash) return { el: to.hash }
+    if (to.path !== from.path) return { top: 0 }
+    return {}
+  },
 })
 
+const canonicalPathMap: Record<string, string> = {
+  '/add-subscription': '/workspace/subscriptions',
+  '/ai/studio': '/workspace/studio',
+  '/draftbox': '/workspace/draftbox',
+  '/billing': '/workspace/billing',
+  '/ops': '/workspace/ops',
+  '/message-tasks': '/workspace/ops/messages',
+  '/tags': '/workspace/ops/tags',
+  '/configs': '/workspace/ops/configs',
+  '/admin/plans': '/workspace/admin/plans',
+}
+
 router.beforeEach(async (to, from, next) => {
+  const canonicalPath = canonicalPathMap[to.path]
+  if (canonicalPath && canonicalPath !== to.path) {
+    return next({
+      path: canonicalPath,
+      query: to.query,
+      hash: to.hash,
+      replace: true,
+    })
+  }
+
+  const token = localStorage.getItem('token')
+  if (to.path === '/login' && token) {
+    return next((to.query.redirect as string) || '/workspace/content')
+  }
+
   // 不需要认证的路由直接放行
   if (!to.meta.requiresAuth) {
     return next()
   }
 
-  const token = localStorage.getItem('token')
-  
   // 未登录则跳转登录页
   if (!token) {
     return next({
       path: '/login',
-      query: { redirect: to.fullPath } // 保存目标路由用于登录后跳转
+      query: {
+        redirect: to.fullPath, // 保存目标路由用于登录后跳转
+        error: 'unauthorized',
+      }
     })
   }
 
   // 已登录状态，验证token有效性
   try {
     // 确保从正确路径导入verifyToken
-    const { verifyToken } = await import('@/api/auth')
+    const { verifyToken, getCurrentUser } = await import('@/api/auth')
     await verifyToken()
+
+    const requiredPermissions = (to.meta.permissions || []) as string[]
+    if (requiredPermissions.length > 0) {
+      const user = await getCurrentUser()
+      const role = user?.role || ''
+      // 当前版本保持与原有行为一致：仅对 admin 进行硬拦截，
+      // 其余细粒度权限由后端接口返回控制。
+      if (requiredPermissions.includes('admin') && role !== 'admin') {
+        return next({
+          path: '/workspace/content',
+          query: {
+            notice: 'forbidden',
+            target: to.path,
+          },
+        })
+      }
+    }
     next()
   } catch (error) {
     console.error('Token验证失败:', error)

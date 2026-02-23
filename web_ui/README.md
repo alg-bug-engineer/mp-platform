@@ -1,4 +1,4 @@
-# 微信公众号订阅助手 - WebUI
+# Content Studio - WebUI
 
 基于Vue3 + Vite + ArcoDesign构建的前端界面
 

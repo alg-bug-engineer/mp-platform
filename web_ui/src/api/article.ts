@@ -13,7 +13,7 @@ import http from './http'
  * @property is_read 阅读状态
  */
 export interface Article {
-  id: number
+  id: string
   title: string
   content: string
   mp_name: string
@@ -22,6 +22,8 @@ export interface Article {
   link: string
   created_at: string
   is_read?: number
+  has_content?: boolean
+  content_tip?: string
 }
 
 /**
@@ -33,6 +35,8 @@ export interface Article {
  * @property mp_id 公众号ID
  */
 export interface ArticleListParams {
+  page?: number
+  pageSize?: number
   offset?: number
   limit?: number
   search?: string
@@ -75,17 +79,27 @@ export const getArticles = (params: ArticleListParams) => {
  * @parama 类型 0当前,-1上一篇,1下一篇
  * @returns 文章详情结果
  */
-export const getArticleDetail = (id: number,action_type:number) => {
+export const getArticleDetail = (id: string, action_type: number = 0, autoFetch: boolean = true) => {
   switch(action_type){
     case -1:
-      return http.get<{code: number, data: Article}>(`/wx/articles/${id}/prev`)
+      return http.get<{code: number, data: Article}>(`/wx/articles/${id}/prev`, {
+        params: { auto_fetch: autoFetch }
+      })
     case 1:
-      return http.get<{code: number, data: Article}>(`/wx/articles/${id}/next`)
+      return http.get<{code: number, data: Article}>(`/wx/articles/${id}/next`, {
+        params: { auto_fetch: autoFetch }
+      })
     default:
       // 默认获取当前文章详情
-      return http.get<{code: number, data: Article}>(`/wx/articles/${id}`)
+      return http.get<{code: number, data: Article}>(`/wx/articles/${id}`, {
+        params: { auto_fetch: autoFetch }
+      })
       break
   }
+}
+
+export const fetchArticleContent = (id: string) => {
+  return http.post<{code: number, data: Article}>(`/wx/articles/${id}/fetch_content`)
 }
 
 /**
@@ -93,7 +107,7 @@ export const getArticleDetail = (id: number,action_type:number) => {
  * @param id 当前文章ID
  * @returns 上一篇文章详情结果
  */
-export const getPrevArticleDetail = (id: number) => {
+export const getPrevArticleDetail = (id: string) => {
   return http.get<{code: number, data: Article}>(`/wx/articles/${id}/prev`)
 }
 
@@ -102,7 +116,7 @@ export const getPrevArticleDetail = (id: number) => {
  * @param id 当前文章ID
  * @returns 下一篇文章详情结果
  */
-export const getNextArticleDetail = (id: number) => {
+export const getNextArticleDetail = (id: string) => {
   return http.get<{code: number, data: Article}>(`/wx/articles/${id}/next`)
 }
 
@@ -111,7 +125,7 @@ export const getNextArticleDetail = (id: number) => {
  * @param id 文章ID
  * @returns 删除结果
  */
-export const deleteArticle = (id: number) => {
+export const deleteArticle = (id: string) => {
   return http.delete<{code: number, message: string}>(`/wx/articles/${id}`)
 }
 
@@ -120,7 +134,7 @@ export const deleteArticle = (id: number) => {
  * @param id 无实际作用（保留参数）
  * @returns 清空结果
  */
-export const ClearArticle = (id: number) => {
+export const ClearArticle = (id?: number) => {
   return http.delete<{code: number, message: string}>(`/wx/articles/clean`)
 }
 
@@ -129,7 +143,7 @@ export const ClearArticle = (id: number) => {
  * @param id 无实际作用（保留参数）
  * @returns 清空结果
  */
-export const ClearDuplicateArticle = (id: number) => {
+export const ClearDuplicateArticle = (id?: number) => {
   return http.delete<{code: number, message: string}>(`/wx/articles/clean_duplicate_articles`)
 }
 
@@ -139,7 +153,7 @@ export const ClearDuplicateArticle = (id: number) => {
  * @param is_read 阅读状态
  * @returns 操作结果
  */
-export const toggleArticleReadStatus = (id: number, is_read: boolean) => {
+export const toggleArticleReadStatus = (id: string, is_read: boolean) => {
   return http.put<{code: number, message: string, is_read: boolean}>(`/wx/articles/${id}/read`, null, {
     params: { is_read }
   })

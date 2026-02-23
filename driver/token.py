@@ -30,10 +30,10 @@ def set_token(data:any,ext_data:any=None):
     wx_cfg.reload()
     from jobs.notice import sys_notice
     
-#     sys_notice(f"""WeRss授权成功
+#     sys_notice(f"""授权成功
 # - Token: {data.get("token")}
 # - Expiry: {data.get("expiry")['expiry_time']}
-# """, str(cfg.get("server.code_title","WeRss授权成功")))
+# """, str(cfg.get("server.code_title","授权成功")))
 
 
 def get(key:str,default:str="")->str:

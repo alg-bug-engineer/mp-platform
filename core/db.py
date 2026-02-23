@@ -113,6 +113,14 @@ class Db:
             art.created_at=datetime.strptime(art.created_at ,'%Y-%m-%d %H:%M:%S')
             art.updated_at=datetime.strptime(art.updated_at,'%Y-%m-%d %H:%M:%S')
             art.content=art.content
+            # 根据公众号归属自动补齐租户字段
+            try:
+                from core.models.feed import Feed
+                feed = session.query(Feed).filter(Feed.id == art.mp_id).first()
+                if feed and hasattr(feed, "owner_id"):
+                    art.owner_id = feed.owner_id
+            except Exception:
+                pass
             from core.models.base import DATA_STATUS
             art.status=DATA_STATUS.ACTIVE
             session.add(art)

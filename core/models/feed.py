@@ -3,6 +3,7 @@ class Feed(Base):
     from_attributes = True
     __tablename__ = 'feeds'
     id = Column(String(255), primary_key=True)
+    owner_id = Column(String(50), index=True)
     mp_name =Column(String(255))
     mp_cover = Column(String(255))
     mp_intro = Column(String(255))

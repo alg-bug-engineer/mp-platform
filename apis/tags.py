@@ -14,6 +14,10 @@ from core.cache import clear_cache_pattern
 # 需要管理员权限执行写操作
 router = APIRouter(prefix="/tags", tags=["标签管理"])
 
+
+def _owner(cur_user: dict) -> str:
+    return cur_user.get("username")
+
 @router.get("", 
     summary="获取标签列表",
     description="分页获取所有标签信息")
@@ -28,7 +32,7 @@ async def get_tags(offset: int = 0, limit: int = 100, db: Session = Depends(get_
     返回:
     - 包含标签列表和分页信息的成功响应
     """
-    query = db.query(TagsModel)
+    query = db.query(TagsModel).filter(TagsModel.owner_id == _owner(cur_user))
     total = query.count()
     tags = query.offset(offset).limit(limit).all()
     return success_response(data={
@@ -68,6 +72,7 @@ async def create_tag(tag: TagsCreate, db: Session = Depends(get_db),cur_user: di
     try:
         db_tag = TagsModel(
             id=str(uuid.uuid4()),
+            owner_id=_owner(cur_user),
             name=tag.name or '',
             cover=tag.cover or '',
             intro=tag.intro or '',
@@ -108,7 +113,10 @@ async def get_tag(tag_id: str, db: Session = Depends(get_db),cur_user: dict = De
     - 成功: 包含标签详情的响应
     - 失败: 201错误响应(标签不存在)
     """
-    tag = db.query(TagsModel).filter(TagsModel.id == tag_id).first()
+    tag = db.query(TagsModel).filter(
+        TagsModel.id == tag_id,
+        TagsModel.owner_id == _owner(cur_user)
+    ).first()
     if not tag:
         return error_response(code=status.HTTP_201_CREATED, message="Tag not found")
     return success_response(data=tag)
@@ -138,7 +146,10 @@ async def update_tag(tag_id: str, tag_data: TagsCreate, db: Session = Depends(ge
     - 失败: 404错误响应(标签不存在)或500错误响应(服务器错误)
     """
     try:
-        tag = db.query(TagsModel).filter(TagsModel.id == tag_id).first()
+        tag = db.query(TagsModel).filter(
+            TagsModel.id == tag_id,
+            TagsModel.owner_id == _owner(cur_user)
+        ).first()
         if not tag:
             return error_response(code=404, message="Tag not found")
         
@@ -176,7 +187,10 @@ async def delete_tag(tag_id: str, db: Session = Depends(get_db),cur_user: dict =
     - 失败: 404错误响应(标签不存在)或500错误响应(服务器错误)
     """
     try:
-        tag = db.query(TagsModel).filter(TagsModel.id == tag_id).first()
+        tag = db.query(TagsModel).filter(
+            TagsModel.id == tag_id,
+            TagsModel.owner_id == _owner(cur_user)
+        ).first()
         if not tag:
             return error_response(code=status.HTTP_201_CREATED, message="Tag not found")
         db.delete(tag)

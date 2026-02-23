@@ -32,9 +32,8 @@
 </template>
 
 <script lang="ts" setup>
-import { ref } from 'vue'
-import { QRCode, checkQRCodeStatus } from '@/api/auth'
-import { Message } from '@arco-design/web-vue'
+import { onBeforeUnmount, ref } from 'vue'
+import { QRCode, checkQRCodeStatus, stopQRCodeStatusCheck } from '@/api/auth'
 
 const emit = defineEmits(['success', 'error'])
 
@@ -43,49 +42,56 @@ const loading = ref(false)
 const qrcodeUrl = ref('')
 const errorMessage = ref('')
 
-let checkStatusTimer: number | null = null
+const normalizeError = (err: unknown) => {
+  if (typeof err === 'string') return err
+  if (err instanceof Error) return err.message || '操作失败，请重试'
+  return '操作失败，请重试'
+}
 
 const startAuth = async () => {
+  clearTimer()
   try {
     visible.value = true
     loading.value = true
+    qrcodeUrl.value = ''
     errorMessage.value = ''
     
     // 获取二维码
     const res = await QRCode()
-    qrcodeUrl.value = res?.code
+    if (!res?.code) {
+      throw new Error(res?.msg || '二维码生成失败')
+    }
+    qrcodeUrl.value = String(res.code)
     loading.value = false
 
     // 开始检查授权状态
-        checkQRCodeStatus().then((statusRes) => {
-          if (statusRes?.login_status) {
-            clearTimer()
-            // Message.success('授权成功')
-            emit('success', statusRes)
-            visible.value = false
-          }
-        }).catch((err) => {
-          console.error('检查二维码状态失败:', err)
-          errorMessage.value = '授权失败，请重试'
-           emit('error', err)
-        })
+    checkQRCodeStatus().then((statusRes) => {
+      if (statusRes?.login_status) {
+        clearTimer()
+        emit('success', statusRes)
+        visible.value = false
+      }
+    }).catch((err) => {
+      qrcodeUrl.value = ''
+      errorMessage.value = normalizeError(err) || '授权失败，请重试'
+      emit('error', err)
+    })
   } catch (err) {
     loading.value = false
-    errorMessage.value = '获取二维码失败，请重试'
+    errorMessage.value = normalizeError(err) || '获取二维码失败，请重试'
     emit('error', err)
   }
 }
 
 const clearTimer = () => {
-  if (checkStatusTimer) {
-    clearInterval(checkStatusTimer)
-    checkStatusTimer = null
-  }
+  stopQRCodeStatusCheck()
 }
 
 defineExpose({
   startAuth
 })
+
+onBeforeUnmount(clearTimer)
 </script>
 
 <style scoped>

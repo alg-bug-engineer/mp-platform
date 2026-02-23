@@ -96,8 +96,8 @@ class RSS:
         except:
             return text
        
-    def generate_rss(self,rss_list: dict, title: str = "Mp-We-Rss", 
-                    link: str = "https://github.com/rachelos/we-mp-rss",
+    def generate_rss(self,rss_list: dict, title: str = "Content Studio", 
+                    link: str = "",
                     description: str = "RSS频道", language: str = "zh-CN",image_url:str=""):
         from core.config import cfg
         full_context=bool(cfg.get("rss.full_context",False))
@@ -112,7 +112,7 @@ class RSS:
         ET.SubElement(channel, "link").text = link
         ET.SubElement(channel, "description").text = description
         ET.SubElement(channel, "language").text = language
-        ET.SubElement(channel, "generator").text = "Mp-We-Rss"
+        ET.SubElement(channel, "generator").text = "Content Studio"
         # Use timezone-aware now (CST/UTC+8) so %z shows +0800
         ET.SubElement(channel, "lastBuildDate").text = datetime.now(timezone(timedelta(hours=8))).strftime("%a, %d %b %Y %H:%M:%S %z")
     
@@ -159,8 +159,8 @@ class RSS:
                 f.write(tree_str)
         return tree_str
      
-    def generate_atom(self,rss_list: dict, title: str = "Mp-We-Rss", 
-                    link: str = "https://github.com/rachelos/we-mp-rss",
+    def generate_atom(self,rss_list: dict, title: str = "Content Studio", 
+                    link: str = "",
                     description: str = "RSS频道", language: str = "zh-CN",image_url:str="") -> str:
         """生成Atom格式的RSS内容
         
@@ -189,7 +189,7 @@ class RSS:
         # Use timezone-aware now (CST/UTC+8) so %z shows +0800
         ET.SubElement(feed, "updated").text = datetime.now(timezone(timedelta(hours=8))).strftime("%a, %d %b %Y %H:%M:%S %z")
         ET.SubElement(feed, "id").text = str(link)
-        ET.SubElement(feed, "author").text = "Mp-We-Rss"
+        ET.SubElement(feed, "author").text = "Content Studio"
         # 设置image子项
         if cfg.get("rss.add_cover",False)==True and image_url != "":
             image = ET.SubElement(feed, "image")
@@ -243,8 +243,8 @@ class RSS:
         elif ext in("txt"):
             return "text"
         return "html"
-    def generate_json(self, rss_list: dict,title: str = "Mp-We-Rss", 
-                    link: str = "https://github.com/rachelos/we-mp-rss",
+    def generate_json(self, rss_list: dict,title: str = "Content Studio", 
+                    link: str = "",
                     description: str = "RSS频道", language: str = "zh-CN",image_url:str="") -> str:
         """获取JSON格式的RSS内容
         
@@ -284,8 +284,8 @@ class RSS:
                 return f.read()  
         except FileNotFoundError:
             return None     
-    def generate(self,rss_list: dict,ext=str, title: str = "Mp-We-Rss", 
-                    link: str = "https://github.com/rachelos/we-mp-rss",
+    def generate(self,rss_list: dict,ext=str, title: str = "Content Studio", 
+                    link: str = "",
                     description: str = "RSS频道", language: str = "zh-CN",image_url:str="",template:str=None) -> str:
         """根据扩展名获取对应格式的RSS内容
         
@@ -312,7 +312,7 @@ class RSS:
             return self.generate_by_template(rss_list,template, title=title, link=link, description=description,language=language,image_url=image_url)
         else:
             raise ValueError(f"Unsupported extension: {ext}")
-    def generate_by_template(self,rss_list: dict, template: str, title: str = "Mp-We-Rss",link: str = "https://github.com/rachelos/we-mp-rss",description: str = "RSS频道",language: str = "zh-CN",image_url:str=""):
+    def generate_by_template(self,rss_list: dict, template: str, title: str = "Content Studio",link: str = "",description: str = "RSS频道",language: str = "zh-CN",image_url:str=""):
             from core.lax import TemplateParser
             template = TemplateParser(template)
             return template.render({"articles": rss_list, "title": title,"link":link,"description":description,"language":language,"image_url":image_url})

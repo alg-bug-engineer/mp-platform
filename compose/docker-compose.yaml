@@ -1,8 +1,7 @@
-version: '3.9'
 services:
   mysql:
     image: docker.1ms.run/mysql:8.3.0
-    container_name: db-mp
+    container_name: content-studio-mysql
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: rootpass123
@@ -16,16 +15,22 @@ services:
       - db_data:/var/lib/mysql
       - ./mysql-init:/docker-entrypoint-initdb.d
 
-  we-mp-rss:
-    image: ghcr.io/rachelos/we-mp-rss:latest
-    container_name: we-mp-rss
+  content-studio:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: content-studio
     restart: unless-stopped
     ports:
       - "8001:8001"
+    env_file:
+      - ../.env.deploy
     environment:
-      - DB=mysql+pymysql://rss_user:pass123456@db-mp/we_mp_rss?charset=utf8mb4
+      - DB=mysql+pymysql://rss_user:pass123456@mysql/we_mp_rss?charset=utf8mb4
       - USERNAME=admin
       - PASSWORD=admin@123
+      - APP_NAME=content-studio
+      - WEB_NAME=商业化内容创作平台
     volumes:
       - ./data:/app/data
     depends_on:
@@ -35,6 +40,6 @@ volumes:
   db_data:
 
 networks:
-  we-mp-rss:
+  content-studio:
 
 

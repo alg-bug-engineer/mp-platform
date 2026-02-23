@@ -11,6 +11,7 @@ class MessageTask(Base):
     
     # 定义 id 字段，作为主键，同时创建索引
     id = Column(String(255), primary_key=True, index=True)
+    owner_id = Column(String(50), index=True)
     # 任务ID
     task_id = Column(String(255), nullable=False)
     # 公众号ID

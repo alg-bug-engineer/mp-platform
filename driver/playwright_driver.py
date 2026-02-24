@@ -101,6 +101,8 @@ class PlaywrightController:
 
             if self.system != "windows":
                 headless = True
+            # 获取系统代理设置
+            proxy_server = os.getenv("https_proxy") or os.getenv("http_proxy") or os.getenv("ALL_PROXY")
             if self.driver is None:
                 if sys.platform == "win32" :
                     # 设置事件循环策略为WindowsSelectorEventLoopPolicy
@@ -113,8 +115,30 @@ class PlaywrightController:
             print(f"启动浏览器: 优先={preferred}, 无头模式={headless}, 移动模式={mobile_mode}, 反爬虫={anti_crawler}")
             # 设置启动选项
             launch_options = {
-                "headless": headless
+                "headless": headless,
+                "timeout": 60000,
+                "args": [
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    "--disable-extensions",
+                    "--disable-blink-features=AutomationControlled",
+                    "--single-process",  # ECS低内存环境建议
+                    "--no-zygote",
+                ]
             }
+            # 关键修复：如果存在系统代理，让 Chromium 使用它
+            if proxy_server:
+                # Playwright 代理格式转换：http://127.0.0.1:7890
+                launch_options["proxy"] = {
+                    "server": proxy_server,
+                    # 如果代理需要认证，取消下面注释并设置环境变量
+                    # "username": os.getenv("PROXY_USER", ""),
+                    # "password": os.getenv("PROXY_PASS", "")
+                }
+                print(f"使用代理: {proxy_server}")
             
             # 在Windows上添加额外的启动选项
             if self.system == "windows":
@@ -364,9 +388,11 @@ class PlaywrightController:
             # 如果发生任何异常，直接跳过清理
             pass
 
-    def open_url(self, url,wait_until="domcontentloaded"):
+    def open_url(self, url, wait_until="domcontentloaded", timeout=60000):
         try:
-            self.page.goto(url,wait_until=wait_until)
+            url = url.strip()
+            print(f"正在访问: {url}")
+            self.page.goto(url, wait_until=wait_until)
         except Exception as e:
             raise Exception(f"打开URL失败: {str(e)}")
 

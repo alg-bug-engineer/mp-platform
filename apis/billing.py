@@ -29,7 +29,7 @@ def _require_admin(current_user: dict):
 class CreateOrderRequest(BaseModel):
     plan_tier: str = Field(default="pro", max_length=20)
     months: int = Field(default=1, ge=1, le=24)
-    channel: str = Field(default="mock", max_length=32)
+    channel: str = Field(default="sandbox", max_length=32)
     note: str = Field(default="", max_length=500)
 
 
@@ -103,7 +103,7 @@ async def get_all_orders(
     return success_response(list_orders(session, owner_id="", status=status, limit=limit))
 
 
-@router.post("/orders/{order_no}/pay", summary="确认订单支付（模拟）")
+@router.post("/orders/{order_no}/pay", summary="确认订单支付")
 async def pay_order(order_no: str, payload: PayOrderRequest, current_user: dict = Depends(get_current_user)):
     session = DB.get_session()
     order = get_order_by_no(session, order_no)
@@ -140,7 +140,7 @@ async def cancel_billing_order(order_no: str, payload: CancelOrderRequest, curre
         raise HTTPException(status_code=400, detail=f"取消失败: {e}")
 
 
-@router.post("/webhook/mock", summary="模拟支付回调")
+@router.post("/webhook/mock", summary="支付回调处理（管理员）")
 async def mock_webhook(payload: WebhookMockRequest, current_user: dict = Depends(get_current_user)):
     _require_admin(current_user)
     session = DB.get_session()

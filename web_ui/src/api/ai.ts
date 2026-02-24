@@ -47,18 +47,30 @@ export interface AIComposePayload {
   audience?: string
   tone?: string
   generate_images?: boolean
+  force_refresh?: boolean
 }
 
 export interface AIComposeResult {
+  id?: string
   article_id: string
   mode: 'analyze' | 'create' | 'rewrite'
   result: string
+  source_title?: string
   recommended_tags?: string[]
   image_prompts?: string[]
   images?: string[]
   image_notice?: string
   options?: Record<string, any>
   plan?: PlanSummary
+  from_cache?: boolean
+  cached_at?: string | null
+  result_id?: string
+  daily_ai?: {
+    limit: number
+    used: number
+    remaining: number
+    date: string
+  }
 }
 
 export interface PlanSummary {
@@ -102,6 +114,8 @@ export interface DraftPublishPayload {
   sync_to_wechat?: boolean
   queue_on_fail?: boolean
   max_retries?: number
+  wechat_app_id?: string
+  wechat_app_secret?: string
   items?: DraftPublishItem[]
 }
 
@@ -133,6 +147,10 @@ export interface WorkbenchOverview {
     unread_count: number
     local_draft_count: number
     pending_publish_count: number
+    daily_ai_limit?: number
+    daily_ai_used?: number
+    daily_ai_remaining?: number
+    daily_ai_date?: string
   }
   activity?: {
     days: number
@@ -206,6 +224,33 @@ export const aiRewrite = (articleId: string, payload: AIComposePayload = {}) => 
   return http.post<AIComposeResult>(`/wx/ai/articles/${articleId}/rewrite`, payload)
 }
 
+export interface InlineIllustrationPayload {
+  selected_text: string
+  context_text?: string
+  platform?: string
+  style?: string
+}
+
+export interface InlineIllustrationResult {
+  article_id: string
+  selected_text: string
+  prompt: string
+  image_url: string
+  images: string[]
+  image_notice?: string
+  plan?: PlanSummary
+  daily_ai?: {
+    limit: number
+    used: number
+    remaining: number
+    date: string
+  }
+}
+
+export const generateInlineIllustration = (articleId: string, payload: InlineIllustrationPayload) => {
+  return http.post<InlineIllustrationResult>(`/wx/ai/articles/${articleId}/illustrate`, payload)
+}
+
 export const publishDraft = (articleId: string, payload: DraftPublishPayload) => {
   return http.post<{
     local_draft: DraftRecord | DraftRecord[]
@@ -250,6 +295,8 @@ export interface DraftSyncPayload {
   platform?: string
   queue_on_fail?: boolean
   max_retries?: number
+  wechat_app_id?: string
+  wechat_app_secret?: string
 }
 
 export const syncDraftToWechat = (draftId: string, payload: DraftSyncPayload) => {

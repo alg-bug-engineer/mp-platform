@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from datetime import datetime, timedelta
 import os
 import re
@@ -11,20 +11,22 @@ from core.db import DB
 from core.models.article import Article
 from core.models.base import DATA_STATUS
 from core.models.ai_publish_task import AIPublishTask
+from core.models.ai_daily_usage import AIDailyUsage
 from core.models.user import User as DBUser
 from core.config import cfg
 from core.ai_service import (
     get_or_create_profile,
-    update_profile,
-    profile_to_dict,
+    get_platform_profile,
     build_prompt,
     call_openai_compatible,
     recommend_tags_from_title,
     get_compose_options,
     build_image_prompts,
+    build_inline_image_prompt,
     generate_images_with_jimeng,
     merge_image_urls_into_markdown,
     refine_draft,
+    ensure_markdown_content,
     save_local_draft,
     list_local_drafts,
     get_local_draft,
@@ -39,6 +41,7 @@ from core.ai_service import (
     PUBLISH_STATUS_PENDING,
     PUBLISH_STATUS_FAILED,
 )
+from core.prompt_templates import get_frontend_options
 from core.plan_service import (
     get_user_plan_summary,
     validate_ai_action,
@@ -81,20 +84,92 @@ def _extract_first_image_url_from_text(text: str) -> str:
     return ""
 
 
+def _wechat_profile_setup_hint() -> str:
+    return "请先在个人中心填写公众号 AppID 与 AppSecret（个人中心 -> 修改个人信息）后再同步"
+
+
+def _resolve_wechat_openapi_credentials(user: Optional[DBUser], app_id: str, app_secret: str) -> Tuple[str, str, str]:
+    req_app_id = str(app_id or "").strip()
+    req_app_secret = str(app_secret or "").strip()
+    if req_app_id and req_app_secret:
+        return req_app_id, req_app_secret, "request"
+    if req_app_id or req_app_secret:
+        return "", "", "partial_request"
+    if user is None:
+        return "", "", "missing"
+    profile_app_id = str(getattr(user, "wechat_app_id", "") or "").strip()
+    profile_app_secret = str(getattr(user, "wechat_app_secret", "") or "").strip()
+    if profile_app_id and profile_app_secret:
+        return profile_app_id, profile_app_secret, "profile"
+    return "", "", "missing"
+
+
 def _serialize_plan(plan: dict) -> dict:
     data = dict(plan or {})
     reset_at = data.get("quota_reset_at")
     expire_at = data.get("plan_expires_at")
-    data["quota_reset_at"] = reset_at.isoformat() if reset_at else None
-    data["plan_expires_at"] = expire_at.isoformat() if expire_at else None
+    # Safely serialize datetime fields
+    try:
+        data["quota_reset_at"] = reset_at.isoformat() if reset_at and hasattr(reset_at, 'isoformat') else None
+    except Exception:
+        data["quota_reset_at"] = None
+    try:
+        data["plan_expires_at"] = expire_at.isoformat() if expire_at and hasattr(expire_at, 'isoformat') else None
+    except Exception:
+        data["plan_expires_at"] = None
     return data
 
 
-class AIProfileUpsert(BaseModel):
-    base_url: str = Field(default="https://api.moonshot.cn/v1")
-    api_key: str = Field(default="")
-    model_name: str = Field(default="kimi-k2-0711-preview")
-    temperature: int = Field(default=70, ge=0, le=100)
+def _daily_ai_limit() -> int:
+    try:
+        value = int(cfg.get("ai.daily_limit", 60) or 60)
+    except Exception:
+        value = 60
+    return max(1, value)
+
+
+def _today_key(now: Optional[datetime] = None) -> str:
+    target = now or datetime.now()
+    return target.strftime("%Y-%m-%d")
+
+
+def _get_today_usage(session, owner_id: str, now: Optional[datetime] = None) -> Optional[AIDailyUsage]:
+    return session.query(AIDailyUsage).filter(
+        AIDailyUsage.owner_id == owner_id,
+        AIDailyUsage.usage_date == _today_key(now),
+    ).first()
+
+
+def _daily_usage_snapshot(session, owner_id: str, now: Optional[datetime] = None) -> dict:
+    limit = _daily_ai_limit()
+    usage = _get_today_usage(session, owner_id, now=now)
+    used = int(getattr(usage, "used_count", 0) or 0)
+    used = max(0, used)
+    return {
+        "limit": limit,
+        "used": used,
+        "remaining": max(0, limit - used),
+        "date": _today_key(now),
+    }
+
+
+def _consume_daily_ai_usage(session, owner_id: str, amount: int = 1, now: Optional[datetime] = None) -> dict:
+    amount_value = max(0, int(amount or 0))
+    target = now or datetime.now()
+    usage = _get_today_usage(session, owner_id, now=target)
+    if usage is None:
+        usage = AIDailyUsage(
+            id=f"{owner_id}:{_today_key(target)}",
+            owner_id=owner_id,
+            usage_date=_today_key(target),
+            used_count=0,
+            created_at=target,
+            updated_at=target,
+        )
+        session.add(usage)
+    usage.used_count = int(getattr(usage, "used_count", 0) or 0) + amount_value
+    usage.updated_at = target
+    return _daily_usage_snapshot(session, owner_id, now=target)
 
 
 class AIComposeRequest(BaseModel):
@@ -106,6 +181,7 @@ class AIComposeRequest(BaseModel):
     audience: str = Field(default="", max_length=200)
     tone: str = Field(default="", max_length=200)
     generate_images: bool = Field(default=True)
+    force_refresh: bool = Field(default=False)
 
 
 class DraftPublishItem(BaseModel):
@@ -127,6 +203,8 @@ class DraftPublishRequest(BaseModel):
     sync_to_wechat: bool = Field(default=True)
     queue_on_fail: bool = Field(default=True)
     max_retries: int = Field(default=3, ge=1, le=8)
+    wechat_app_id: str = Field(default="", max_length=128)
+    wechat_app_secret: str = Field(default="", max_length=256)
     items: List[DraftPublishItem] = Field(default_factory=list)
 
 
@@ -160,32 +238,31 @@ class DraftSyncRequest(BaseModel):
     platform: str = Field(default="wechat", max_length=32)
     queue_on_fail: bool = Field(default=True)
     max_retries: int = Field(default=3, ge=1, le=8)
+    wechat_app_id: str = Field(default="", max_length=128)
+    wechat_app_secret: str = Field(default="", max_length=256)
 
 
-@router.get("/profile", summary="获取AI配置")
+class InlineIllustrationRequest(BaseModel):
+    selected_text: str = Field(default="", max_length=3000)
+    context_text: str = Field(default="", max_length=12000)
+    platform: str = Field(default="wechat", max_length=32)
+    style: str = Field(default="专业深度", max_length=64)
+
+
+@router.get("/profile", summary="获取AI配置（平台统一）")
 async def get_profile(current_user: dict = Depends(get_current_user)):
-    session = DB.get_session()
-    profile = get_or_create_profile(session, _owner(current_user))
-    return success_response(profile_to_dict(profile, include_secret=False))
+    return success_response(get_platform_profile(mask_secret=True))
 
 
-@router.put("/profile", summary="更新AI配置")
-async def put_profile(payload: AIProfileUpsert, current_user: dict = Depends(get_current_user)):
-    session = DB.get_session()
-    profile = update_profile(
-        session=session,
-        owner_id=_owner(current_user),
-        base_url=payload.base_url,
-        api_key=payload.api_key,
-        model_name=payload.model_name,
-        temperature=payload.temperature,
-    )
-    return success_response(profile_to_dict(profile, include_secret=False), message="AI配置已更新")
+@router.put("/profile", summary="更新AI配置（禁用）")
+async def put_profile(payload: dict, current_user: dict = Depends(get_current_user)):
+    raise HTTPException(status_code=403, detail="平台统一提供 AI 能力，不支持用户修改 AI 配置")
 
 
 @router.get("/compose/options", summary="获取创作选项")
 async def compose_options(current_user: dict = Depends(get_current_user)):
-    return success_response(get_compose_options())
+    # 使用新的场景化描述
+    return success_response(get_frontend_options())
 
 
 @router.get("/plans", summary="获取套餐目录")
@@ -218,6 +295,7 @@ async def workbench_overview(current_user: dict = Depends(get_current_user)):
 
     wx_authorized = has_wechat_auth(session, owner_id)
     all_drafts = list_local_drafts(owner_id, limit=99999)
+    daily_ai = _daily_usage_snapshot(session, owner_id)
     recent_tasks = session.query(AIPublishTask).filter(
         AIPublishTask.owner_id == owner_id,
         AIPublishTask.created_at >= (datetime.now() - timedelta(days=6)),
@@ -253,11 +331,24 @@ async def workbench_overview(current_user: dict = Depends(get_current_user)):
                 AIPublishTask.owner_id == owner_id,
                 AIPublishTask.status.in_([PUBLISH_STATUS_PENDING, PUBLISH_STATUS_FAILED]),
             ).count(),
+            "daily_ai_limit": daily_ai.get("limit", 0),
+            "daily_ai_used": daily_ai.get("used", 0),
+            "daily_ai_remaining": daily_ai.get("remaining", 0),
+            "daily_ai_date": daily_ai.get("date", ""),
         },
         "activity": activity,
         "wechat_auth": {
             "authorized": wx_authorized,
             "hint": "如需一键投递公众号草稿箱，请先完成扫码授权",
+        },
+        "wechat_openapi": {
+            "app_id_set": bool(str(getattr(user, "wechat_app_id", "") or "").strip()),
+            "app_secret_set": bool(str(getattr(user, "wechat_app_secret", "") or "").strip()),
+            "configured": bool(
+                str(getattr(user, "wechat_app_id", "") or "").strip()
+                and str(getattr(user, "wechat_app_secret", "") or "").strip()
+            ),
+            "hint": _wechat_profile_setup_hint(),
         },
         "wechat_whitelist": {
             "ips": whitelist_ips,
@@ -336,6 +427,15 @@ async def sync_draft(
     user = session.query(DBUser).filter(DBUser.username == owner_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
+    wechat_app_id, wechat_app_secret, source = _resolve_wechat_openapi_credentials(
+        user=user,
+        app_id=payload.wechat_app_id,
+        app_secret=payload.wechat_app_secret,
+    )
+    if source == "partial_request":
+        raise HTTPException(status_code=400, detail="AppID 与 AppSecret 需要同时填写")
+    if not wechat_app_id or not wechat_app_secret:
+        raise HTTPException(status_code=400, detail=_wechat_profile_setup_hint())
     can_sync, reason, _ = validate_ai_action(user, mode="create", publish_to_wechat=True)
     if not can_sync:
         raise HTTPException(status_code=403, detail=reason)
@@ -348,8 +448,8 @@ async def sync_draft(
         "author": (payload.author or metadata.get("author") or "").strip(),
         "cover_url": (
             payload.cover_url
-            or metadata.get("cover_url")
             or _extract_first_image_url_from_text(payload.content if payload.content is not None else draft.get("content") or "")
+            or metadata.get("cover_url")
             or ""
         ).strip(),
     }
@@ -360,9 +460,12 @@ async def sync_draft(
         [item],
         owner_id=owner_id,
         session=session,
+        wechat_app_id=wechat_app_id,
+        wechat_app_secret=wechat_app_secret,
     )
     queued_task = None
-    can_enqueue = _should_enqueue_publish_retry(message, raw)
+    # 官方接口模式（pipeline 同款）暂不进重试队列，避免缺少密钥上下文。
+    can_enqueue = False
     if (not synced) and payload.queue_on_fail and can_enqueue:
         task = enqueue_publish_task(
             session=session,
@@ -379,7 +482,7 @@ async def sync_draft(
         queued_task = serialize_publish_task(task)
         message = f"{message}，已进入重试队列 1 条"
     elif (not synced) and payload.queue_on_fail and not can_enqueue:
-        message = f"{message}（该错误类型不会进入重试队列）"
+        message = f"{message}（官方接口模式暂不支持重试队列）"
     session.commit()
     return success_response(
         {
@@ -494,12 +597,6 @@ async def _run(mode: str, article_id: str, payload: AIComposeRequest, current_us
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    requested_images = payload.image_count if (mode == "create" and payload.generate_images) else 0
-    ok, reason, _ = validate_ai_action(user, mode=mode, image_count=requested_images)
-    if not ok:
-        raise HTTPException(status_code=403, detail=reason)
-
-    profile = get_or_create_profile(session, owner_id)
     create_options = {
         "platform": payload.platform,
         "style": payload.style,
@@ -507,13 +604,28 @@ async def _run(mode: str, article_id: str, payload: AIComposeRequest, current_us
         "image_count": payload.image_count,
         "audience": payload.audience,
         "tone": payload.tone,
+        "generate_images": payload.generate_images,
     }
+    instruction_text = (payload.instruction or "").strip()
+
+    requested_images = payload.image_count if (mode == "create" and payload.generate_images) else 0
+    ok, reason, _ = validate_ai_action(user, mode=mode, image_count=requested_images)
+    if not ok:
+        raise HTTPException(status_code=403, detail=reason)
+    daily_usage = _daily_usage_snapshot(session, owner_id)
+    if daily_usage["remaining"] <= 0:
+        raise HTTPException(
+            status_code=429,
+            detail=f"今日 AI 调用次数已达上限（{daily_usage['limit']}次），请明天 00:00 后再试",
+        )
+
+    profile = get_or_create_profile(session, owner_id)
 
     system_prompt, user_prompt = build_prompt(
         mode=mode,
         title=article.title or "",
         content=article.content or article.description or "",
-        instruction=(payload.instruction or "").strip(),
+        instruction=instruction_text,
         create_options=create_options,
     )
 
@@ -524,8 +636,9 @@ async def _run(mode: str, article_id: str, payload: AIComposeRequest, current_us
         draft=text,
         title=article.title or "",
         create_options=create_options,
-        instruction=(payload.instruction or "").strip(),
+        instruction=instruction_text,
     )
+    text = ensure_markdown_content(mode=mode, title=article.title or "AI 草稿", text=text)
 
     result = {
         "article_id": article.id,
@@ -533,6 +646,7 @@ async def _run(mode: str, article_id: str, payload: AIComposeRequest, current_us
         "result": text,
         "recommended_tags": recommend_tags_from_title(article.title or ""),
         "options": create_options,
+        "source_title": article.title or "",
     }
 
     if mode == "create":
@@ -541,6 +655,7 @@ async def _run(mode: str, article_id: str, payload: AIComposeRequest, current_us
             platform=payload.platform,
             style=payload.style,
             image_count=payload.image_count,
+            content=text,
         )
         image_urls = []
         image_notice = ""
@@ -553,10 +668,32 @@ async def _run(mode: str, article_id: str, payload: AIComposeRequest, current_us
         result["images"] = image_urls
         result["image_notice"] = image_notice
 
+    local_draft = save_local_draft(
+        owner_id=owner_id,
+        article_id=article.id,
+        title=(article.title or "AI 创作草稿").strip(),
+        content=result.get("result", ""),
+        platform=payload.platform or "wechat",
+        mode=mode,
+        metadata={
+            "digest": "",
+            "author": "",
+            "cover_url": _extract_first_image_url_from_text(result.get("result", "")),
+            "instruction": instruction_text,
+            "options": create_options,
+        },
+    )
+
+    daily_usage = _consume_daily_ai_usage(session, owner_id, amount=1)
     consume_ai_usage(user, image_count=requested_images)
     summary = get_user_plan_summary(user)
     session.commit()
     result["plan"] = _serialize_plan(summary)
+    result["daily_ai"] = daily_usage
+    result["from_cache"] = False
+    result["cached_at"] = ""
+    result["result_id"] = ""
+    result["local_draft"] = local_draft
     return success_response(result)
 
 
@@ -634,45 +771,58 @@ async def publish_draft(article_id: str, payload: DraftPublishRequest, current_u
     }
 
     if payload.sync_to_wechat:
-        ok, reason, _ = validate_ai_action(user, mode="create", publish_to_wechat=True)
-        if not ok:
-            wechat_result["message"] = f"已保存本地草稿，公众号同步未执行：{reason}"
+        wechat_app_id, wechat_app_secret, source = _resolve_wechat_openapi_credentials(
+            user=user,
+            app_id=payload.wechat_app_id,
+            app_secret=payload.wechat_app_secret,
+        )
+        if source == "partial_request":
+            wechat_result["message"] = "已保存本地草稿，公众号同步未执行：AppID 与 AppSecret 需要同时填写"
+        elif not wechat_app_id or not wechat_app_secret:
+            wechat_result["message"] = f"已保存本地草稿，公众号同步未执行：{_wechat_profile_setup_hint()}"
         else:
-            synced, message, raw = publish_batch_to_wechat_draft(
-                publish_items,
-                owner_id=owner_id,
-                session=session,
-            )
-            wechat_result = {
-                "requested": True,
-                "synced": bool(synced),
-                "message": message,
-                "raw": raw,
-                "queued": 0,
-            }
-            can_enqueue = _should_enqueue_publish_retry(message, raw)
-            if not synced and payload.queue_on_fail and can_enqueue:
-                for item in publish_items:
-                    task = enqueue_publish_task(
-                        session=session,
-                        owner_id=owner_id,
-                        article_id=article.id,
-                        title=item["title"],
-                        content=item["content"],
-                        digest=item["digest"],
-                        author=item["author"],
-                        cover_url=item["cover_url"],
-                        platform=payload.platform or "wechat",
-                        max_retries=payload.max_retries,
-                    )
-                    queued_tasks.append(serialize_publish_task(task))
-                wechat_result["queued"] = len(queued_tasks)
-                wechat_result["message"] = (
-                    f'{message}，已进入重试队列 {len(queued_tasks)} 条'
-                    if queued_tasks else message
+            ok, reason, _ = validate_ai_action(user, mode="create", publish_to_wechat=True)
+            if not ok:
+                wechat_result["message"] = f"已保存本地草稿，公众号同步未执行：{reason}"
+            else:
+                synced, message, raw = publish_batch_to_wechat_draft(
+                    publish_items,
+                    owner_id=owner_id,
+                    session=session,
+                    wechat_app_id=wechat_app_id,
+                    wechat_app_secret=wechat_app_secret,
                 )
-            elif not synced and payload.queue_on_fail and not can_enqueue:
-                wechat_result["message"] = f"{message}（该错误类型不会进入重试队列）"
+                wechat_result = {
+                    "requested": True,
+                    "synced": bool(synced),
+                    "message": message,
+                    "raw": raw,
+                    "queued": 0,
+                }
+                # 官方接口模式（pipeline 同款）暂不进重试队列，避免缺少密钥上下文。
+                can_enqueue = False
+                if not synced and payload.queue_on_fail and can_enqueue:
+                    for item in publish_items:
+                        task = enqueue_publish_task(
+                            session=session,
+                            owner_id=owner_id,
+                            article_id=article.id,
+                            title=item["title"],
+                            content=item["content"],
+                            digest=item["digest"],
+                            author=item["author"],
+                            cover_url=item["cover_url"],
+                            platform=payload.platform or "wechat",
+                            max_retries=payload.max_retries,
+                        )
+                        queued_tasks.append(serialize_publish_task(task))
+                    wechat_result["queued"] = len(queued_tasks)
+                    wechat_result["message"] = (
+                        f'{message}，已进入重试队列 {len(queued_tasks)} 条'
+                        if queued_tasks else message
+                    )
+                elif not synced and payload.queue_on_fail and not can_enqueue:
+                    wechat_result["message"] = f"{message}（官方接口模式暂不支持重试队列）"
 
     plan = get_user_plan_summary(user)
     session.commit()
@@ -699,3 +849,66 @@ async def create(article_id: str, payload: AIComposeRequest, current_user: dict 
 @router.post("/articles/{article_id}/rewrite", summary="一键仿写")
 async def rewrite(article_id: str, payload: AIComposeRequest, current_user: dict = Depends(get_current_user)):
     return await _run("rewrite", article_id, payload, current_user)
+
+
+@router.post("/articles/{article_id}/illustrate", summary="根据选中文本生成内容配图")
+async def illustrate(
+    article_id: str,
+    payload: InlineIllustrationRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    session = DB.get_session()
+    owner_id = _owner(current_user)
+    article = session.query(Article).filter(
+        Article.id == article_id,
+        Article.owner_id == owner_id,
+        Article.status != DATA_STATUS.DELETED,
+    ).first()
+    if not article:
+        raise HTTPException(status_code=404, detail="文章不存在")
+
+    user = session.query(DBUser).filter(DBUser.username == owner_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    selected_text = str(payload.selected_text or "").strip()
+    if len(selected_text) < 6:
+        raise HTTPException(status_code=400, detail="请先选中一段内容后再生成配图")
+
+    ok, reason, _ = validate_ai_action(user, mode="create", image_count=1)
+    if not ok:
+        raise HTTPException(status_code=403, detail=reason)
+    daily_usage = _daily_usage_snapshot(session, owner_id)
+    if daily_usage["remaining"] <= 0:
+        raise HTTPException(
+            status_code=429,
+            detail=f"今日 AI 调用次数已达上限（{daily_usage['limit']}次），请明天 00:00 后再试",
+        )
+
+    prompt = build_inline_image_prompt(
+        title=article.title or "",
+        selected_text=selected_text,
+        platform=payload.platform,
+        style=payload.style,
+        context_text=(payload.context_text or "")[:1200],
+    )
+    image_urls, image_notice = generate_images_with_jimeng([prompt])
+
+    next_daily_usage = _consume_daily_ai_usage(session, owner_id, amount=1)
+    consume_ai_usage(user, image_count=1)
+    plan = get_user_plan_summary(user)
+    session.commit()
+
+    return success_response(
+        {
+            "article_id": article.id,
+            "selected_text": selected_text,
+            "prompt": prompt,
+            "image_url": image_urls[0] if image_urls else "",
+            "images": image_urls,
+            "image_notice": image_notice,
+            "plan": _serialize_plan(plan),
+            "daily_ai": next_daily_usage,
+        },
+        message="已生成内容配图" if image_urls else "配图生成未返回图片，已提供提示词",
+    )

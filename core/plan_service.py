@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Dict, Tuple
+from core.product_mode import is_all_free_mode
 
 
 DEFAULT_PLAN_TIER = "free"
@@ -132,15 +133,34 @@ def get_user_plan_summary(user) -> Dict:
     ai_remaining = max(0, ai_quota - ai_used)
     image_remaining = max(0, image_quota - image_used)
 
+    is_all_free = is_all_free_mode()
+    if is_all_free:
+        ai_quota = max(ai_quota, 999999)
+        image_quota = max(image_quota, 999999)
+        ai_remaining = max(0, ai_quota - ai_used)
+        image_remaining = max(0, image_quota - image_used)
+
     return {
         "tier": tier,
-        "label": f'{plan["label"]}（管理员）' if is_admin else plan["label"],
-        "description": plan["description"],
-        "price_hint": "内部账号" if is_admin else plan["price_hint"],
+        "label": (
+            "全功能体验（管理员）"
+            if is_all_free and is_admin
+            else "全功能体验"
+            if is_all_free
+            else f'{plan["label"]}（管理员）'
+            if is_admin
+            else plan["label"]
+        ),
+        "description": "当前为全站免费开放期，全部功能均可使用" if is_all_free else plan["description"],
+        "price_hint": "当前全站免费开放" if is_all_free else ("内部账号" if is_admin else plan["price_hint"]),
         "allowed_modes": plan["allowed_modes"],
-        "can_generate_images": bool(plan["can_generate_images"] or is_admin),
-        "can_publish_wechat_draft": bool(plan["can_publish_wechat_draft"] or is_admin),
-        "highlights": plan["highlights"],
+        "can_generate_images": True if is_all_free else bool(plan["can_generate_images"] or is_admin),
+        "can_publish_wechat_draft": True if is_all_free else bool(plan["can_publish_wechat_draft"] or is_admin),
+        "highlights": (
+            ["全站免费开放", "AI 图文与公众号投递能力已全部开放", "后续可切换为商业化套餐模式"]
+            if is_all_free
+            else plan["highlights"]
+        ),
         "ai_quota": ai_quota,
         "ai_used": ai_used,
         "ai_remaining": ai_remaining,
@@ -154,6 +174,9 @@ def get_user_plan_summary(user) -> Dict:
 
 def validate_ai_action(user, mode: str, image_count: int = 0, publish_to_wechat: bool = False) -> Tuple[bool, str, Dict]:
     summary = get_user_plan_summary(user)
+    if is_all_free_mode():
+        return True, "", summary
+
     action = str(mode or "").strip().lower()
     if action not in summary["allowed_modes"]:
         return False, f"当前套餐不支持 {action} 操作", summary

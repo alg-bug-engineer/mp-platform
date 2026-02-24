@@ -11,7 +11,7 @@ class BillingOrder(Base):
     months = Column(Integer, nullable=False, default=1)
     amount_cents = Column(Integer, nullable=False, default=0)
     currency = Column(String(16), nullable=False, default="CNY")
-    channel = Column(String(32), nullable=False, default="mock")
+    channel = Column(String(32), nullable=False, default="sandbox")
     status = Column(String(32), nullable=False, default="pending")
     paid_at = Column(DateTime, nullable=True)
     effective_from = Column(DateTime, nullable=True)

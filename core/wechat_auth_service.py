@@ -2,6 +2,8 @@ import json
 import uuid
 from datetime import datetime
 from typing import Dict, Tuple
+import requests
+from core.config import cfg
 
 from core.models.wechat_auth import WechatAuth
 
@@ -97,6 +99,109 @@ def get_token_cookie(session, owner_id: str, allow_global_fallback: bool = True)
         except Exception:
             return "", ""
     return "", ""
+
+
+def _is_invalid_session_message(text: str) -> bool:
+    source = str(text or "").strip().lower()
+    if not source:
+        return False
+    patterns = [
+        "invalid session",
+        "ret=200003",
+        "ret=200013",
+        "err_msg=invalid session",
+        "请先扫码登录公众号平台",
+        "登录失效",
+        "token",
+    ]
+    return any(item in source for item in patterns)
+
+
+def _probe_wechat_session(token: str, cookie: str) -> Tuple[bool, bool, str]:
+    """
+    返回:
+    - is_valid: 是否有效
+    - deterministic: 是否为可判定结果（网络异常时为 False）
+    - detail: 说明信息
+    """
+    token_text = str(token or "").strip()
+    cookie_text = str(cookie or "").strip()
+    if not token_text or not cookie_text:
+        return False, True, "token/cookie 为空"
+
+    url = "https://mp.weixin.qq.com/cgi-bin/searchbiz"
+    params = {
+        "action": "search_biz",
+        "begin": 0,
+        "count": 1,
+        "query": "微信",
+        "token": token_text,
+        "lang": "zh_CN",
+        "f": "json",
+        "ajax": "1",
+    }
+    headers = {
+        "Cookie": cookie_text,
+        "User-Agent": str(cfg.get("user_agent", "Mozilla/5.0")),
+    }
+    try:
+        resp = requests.get(url, params=params, headers=headers, timeout=8)
+    except requests.RequestException as e:
+        return False, False, f"network_error:{e}"
+
+    if int(resp.status_code or 0) >= 500:
+        return False, False, f"http_{resp.status_code}"
+    if int(resp.status_code or 0) >= 400:
+        return False, True, f"http_{resp.status_code}"
+
+    try:
+        data = resp.json()
+    except Exception:
+        body = str(resp.text or "")[:240]
+        if _is_invalid_session_message(body):
+            return False, True, body
+        return False, False, "non_json_response"
+
+    base_resp = data.get("base_resp") if isinstance(data, dict) else {}
+    ret = int((base_resp or {}).get("ret", -1))
+    if ret == 0:
+        return True, True, ""
+    err_msg = str((base_resp or {}).get("err_msg") or data.get("errmsg") or "")
+    detail = f"{err_msg}:代码:{ret}" if err_msg else f"ret={ret}"
+    return False, True, detail
+
+
+def validate_and_maybe_clear_wechat_auth(session, owner_id: str) -> Dict:
+    """
+    严格校验当前用户微信授权。
+    - 判定为 invalid session 时自动清空 token/cookie，避免前端继续显示“已授权”。
+    """
+    item = get_wechat_auth(session, owner_id)
+    if not item:
+        return {"authorized": False, "validated": True, "status": "empty", "message": ""}
+
+    token = str(item.token or "").strip()
+    cookie = str(item.cookie or "").strip()
+    if not token or not cookie:
+        return {"authorized": False, "validated": True, "status": "empty", "message": ""}
+
+    is_valid, deterministic, detail = _probe_wechat_session(token, cookie)
+    if is_valid:
+        return {"authorized": True, "validated": True, "status": "valid", "message": ""}
+
+    if deterministic and _is_invalid_session_message(detail):
+        item.token = ""
+        item.cookie = ""
+        item.updated_at = datetime.now()
+        session.commit()
+        return {"authorized": False, "validated": True, "status": "invalid_cleared", "message": detail}
+
+    return {
+        "authorized": bool(token and cookie),
+        "validated": bool(deterministic),
+        "status": "unknown" if not deterministic else "invalid",
+        "message": detail,
+    }
 
 
 def migrate_global_auth_to_owner(session, owner_id: str = "admin", overwrite: bool = False) -> Dict:

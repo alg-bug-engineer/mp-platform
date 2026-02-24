@@ -15,6 +15,8 @@ class _MockResp:
 
 
 class AIWechatPublishErrorTestCase(unittest.TestCase):
+    BODY_WITH_IMAGE = "![img](https://mmbiz.qpic.cn/sz_mmbiz_png/demo.png)"
+
     @patch("core.ai_service._try_upload_cover_media_id", return_value=("", ""))
     @patch("core.ai_service._wechat_auth", return_value=("token", "cookie"))
     @patch("core.ai_service.requests.post")
@@ -29,7 +31,7 @@ class AIWechatPublishErrorTestCase(unittest.TestCase):
             },
         )
         ok, message, _ = publish_batch_to_wechat_draft(
-            [{"title": "t", "content": "c"}],
+            [{"title": "t", "content": self.BODY_WITH_IMAGE}],
             owner_id="u1",
             session=object(),
         )
@@ -50,7 +52,7 @@ class AIWechatPublishErrorTestCase(unittest.TestCase):
             },
         )
         ok, message, _ = publish_batch_to_wechat_draft(
-            [{"title": "t", "content": "c"}],
+            [{"title": "t", "content": self.BODY_WITH_IMAGE}],
             owner_id="u1",
             session=object(),
         )
@@ -79,7 +81,7 @@ class AIWechatPublishErrorTestCase(unittest.TestCase):
             ),
         ]
         ok, message, _ = publish_batch_to_wechat_draft(
-            [{"title": "t", "content": "c", "cover_url": "https://demo"}],
+            [{"title": "t", "content": self.BODY_WITH_IMAGE, "cover_url": "https://demo"}],
             owner_id="u1",
             session=object(),
         )

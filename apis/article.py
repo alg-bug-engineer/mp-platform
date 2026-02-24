@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status as fast_status, Query
 from core.auth import get_current_user
 from core.db import DB
@@ -17,7 +18,7 @@ def _owner(current_user: dict) -> str:
     return current_user.get("username")
 
 
-def _try_fetch_article_content(article: Article, session) -> tuple[bool, str]:
+async def _try_fetch_article_content(article: Article, session) -> tuple[bool, str]:
     """
     在正文为空时尝试抓取全文。
     返回: (是否成功, 错误信息)
@@ -30,15 +31,18 @@ def _try_fetch_article_content(article: Article, session) -> tuple[bool, str]:
         return False, "文章缺少原文链接，无法抓取全文"
 
     try:
-        mode = str(cfg.get("gather.content_mode", "web")).lower()
+        mode = str(cfg.get("gather.content_mode", "web")).strip().lower()
         content = ""
         if mode == "web":
-            from driver.wxarticle import Web
-            info = Web.get_article_content(url)
+            # 避免在 FastAPI asyncio 事件循环中直接调用 Playwright 同步 API。
+            from driver.wxarticle import WXArticleFetcher
+            fetcher = WXArticleFetcher()
+            info = await fetcher.async_get_article_content(url)
             content = (info or {}).get("content", "") or ""
         else:
             from core.wx.base import WxGather
-            content = WxGather().Model().content_extract(url) or ""
+            content = await asyncio.to_thread(WxGather().Model().content_extract, url)
+            content = content or ""
 
         content = content.strip()
         if not content:
@@ -290,7 +294,7 @@ async def get_article_detail(
                 )
             )
         if auto_fetch and not (article.content or "").strip():
-            _try_fetch_article_content(article, session)
+            await _try_fetch_article_content(article, session)
             session.refresh(article)
 
         return success_response(_build_article_detail(article))
@@ -366,7 +370,7 @@ async def fetch_article_content(
                 )
             )
 
-        ok, reason = _try_fetch_article_content(article, session)
+        ok, reason = await _try_fetch_article_content(article, session)
         session.refresh(article)
         data = _build_article_detail(article)
         data["fetch_ok"] = ok

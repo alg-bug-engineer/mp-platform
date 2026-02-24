@@ -143,13 +143,34 @@ export:
 ai:
   # 本地规则文件（标签推荐、平台模板、文风约束）
   local_rules_file: ${AI_LOCAL_RULES_FILE:-./data/ai_local_rules.yaml}
+  # 每个用户每日 AI 调用总上限（分析/创作/仿写合计）
+  daily_limit: ${AI_DAILY_LIMIT:-60}
   # 是否启用 AI 二次润色（降低模板腔）
   refine_enabled: ${AI_REFINE_ENABLED:-True}
   # 本地草稿箱目录（用于保存 AI 生成稿）
   draft_dir: ${AI_DRAFT_DIR:-./data/ai_drafts}
   # 投递队列处理间隔（秒）
   publish_queue_interval_seconds: ${AI_PUBLISH_QUEUE_INTERVAL_SECONDS:-45}
+  # 平台统一 AI 服务配置（前端用户无需填写 API Key）
+  provider:
+    base_url: ${AI_PROVIDER_BASE_URL:-https://api.moonshot.cn/v1}
+    model_name: ${AI_PROVIDER_MODEL_NAME:-kimi-k2-0711-preview}
+    api_key: ${AI_PROVIDER_API_KEY:-}
+    temperature: ${AI_PROVIDER_TEMPERATURE:-70}
+    force_platform: ${AI_PROVIDER_FORCE_PLATFORM:-True}
   jimeng:
+    # 生图通道：local（本地 jimeng-api 容器）/ api（AK/SK 直连）
+    channel: ${JIMENG_CHANNEL:-local}
+    # 可配置多个本地地址，逗号分隔；适用于容器内访问宿主机（如 localhost:5100）
+    local_base_urls: ${JIMENG_LOCAL_BASE_URLS:-}
+    # local 通道配置（默认调用本地 docker 服务）
+    local_base_url: ${JIMENG_LOCAL_BASE_URL:-http://127.0.0.1:5100}
+    local_endpoint: ${JIMENG_LOCAL_ENDPOINT:-/v1/images/generations}
+    local_model: ${JIMENG_LOCAL_MODEL:-jimeng-4.5}
+    local_ratio: ${JIMENG_LOCAL_RATIO:-1:1}
+    local_resolution: ${JIMENG_LOCAL_RESOLUTION:-2k}
+    local_token: ${JIMENG_LOCAL_TOKEN:-}
+    local_timeout_seconds: ${JIMENG_LOCAL_TIMEOUT_SECONDS:-120}
     # 即梦生图鉴权（为空则仅返回配图提示词）
     ak: ${JIMENG_AK:-}
     sk: ${JIMENG_SK:-}
@@ -162,6 +183,14 @@ ai:
 billing:
   # 订阅到期扫描间隔（秒）
   subscription_sweep_interval_seconds: ${BILLING_SWEEP_INTERVAL_SECONDS:-3600}
+
+product:
+  # 运营模式：all_free（全站免费开放）或 commercial（套餐支付模式）
+  mode: ${PRODUCT_MODE:-all_free}
+
+analytics:
+  # 是否启用全局埋点与统计
+  enabled: ${ANALYTICS_ENABLED:-True}
 
 
 site:

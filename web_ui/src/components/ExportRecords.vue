@@ -152,7 +152,6 @@ const handleDelete = async (record: any) => {
           mp_id: props.mp_id,
           filename: record.path
         });
-        console.log('删除API返回数据:', response);
         if (response?.message.indexOf('成功') !== -1) {
           // API调用成功后，从本地数组中移除
           const index = exportRecords.value.findIndex((item: any) => item.filename === record.filename);
@@ -164,7 +163,7 @@ const handleDelete = async (record: any) => {
           Message.error('删除失败：' + (response.data?.message || '未知错误'));
         }
       } catch (error) {
-        console.error('删除导出记录失败:', error);
+        Message.error('删除失败，请稍后重试');
       }
     }
   });
@@ -175,7 +174,6 @@ const fetchExportRecords = (): Promise<void> => {
   visable.value = false;
   return getExportRecords({ mp_id: props.mp_id })
     .then((response) => {
-      console.log('API 返回数据:', response);
       // 确保 response 是数组或包含 data 字段的响应
       const records = Array.isArray(response) ? response : (response?.data || []);
       exportRecords.value = records.map(record => ({
@@ -186,10 +184,9 @@ const fetchExportRecords = (): Promise<void> => {
         modified_time: record.modified_time || '-',
         download_url: record.download_url || '#'
       }));
-      console.log('表格数据:', exportRecords.value); // 调试用
     })
     .catch((error) => {
-      console.error('获取导出记录失败:', error);
+      Message.error('获取导出记录失败，请稍后重试');
       exportRecords.value = [];
     })
     .finally(() => {

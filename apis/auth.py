@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import timedelta
 from pydantic import BaseModel, Field
@@ -24,6 +24,7 @@ from core.wechat_auth_service import (
     has_wechat_auth,
     serialize_wechat_auth,
     get_wechat_auth,
+    validate_and_maybe_clear_wechat_auth,
     migrate_global_auth_to_owner,
 )
 router = APIRouter(prefix=f"/auth", tags=["认证"])
@@ -101,13 +102,19 @@ async def qr_success(current_user=Depends(get_current_user)):
 
 
 @router.get("/wechat/auth", summary="获取当前用户公众号授权状态")
-async def get_wechat_auth_status(current_user=Depends(get_current_user)):
+async def get_wechat_auth_status(
+    strict: bool = Query(False, description="是否执行严格会话校验"),
+    current_user=Depends(get_current_user),
+):
     session = DB.get_session()
-    auth = get_wechat_auth(session, current_user.get("username"))
+    owner_id = current_user.get("username")
+    if strict:
+        validate_and_maybe_clear_wechat_auth(session, owner_id)
+    auth = get_wechat_auth(session, owner_id)
     return success_response(serialize_wechat_auth(auth, mask=True))
 
 
-@router.post("/wechat/mock-bind", summary="调试：手工绑定公众号授权（仅管理员）")
+@router.post("/wechat/mock-bind", summary="手工绑定公众号授权（仅管理员）")
 async def mock_bind_wechat_auth(payload: dict, current_user=Depends(get_current_user)):
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限执行")

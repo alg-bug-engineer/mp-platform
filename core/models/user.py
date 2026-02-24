@@ -18,6 +18,8 @@ class User(Base):
     nickname = Column(String(50), default='')  # 昵称
     avatar = Column(String(255), default='/static/default-avatar.png')  # 头像
     email = Column(String(50), default='')
+    wechat_app_id = Column(String(128), default="")
+    wechat_app_secret = Column(String(256), default="")
     
     # 原有字段保持不变
     mp_name = Column(String(255))

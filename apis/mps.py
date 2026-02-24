@@ -52,6 +52,19 @@ def _sanitize_error(err_text: str) -> str:
     return text[:220]
 
 
+def _resolve_gather_auth(session, owner_id: str, allow_global_fallback: bool = False):
+    token, cookie = get_token_cookie(
+        session,
+        owner_id=owner_id,
+        allow_global_fallback=allow_global_fallback,
+    )
+    return (
+        str(token or "").strip(),
+        str(cookie or "").strip(),
+        str(cfg.get("user_agent", "") or "").strip(),
+    )
+
+
 @router.get("/search/{kw}", summary="搜索公众号")
 async def search_mp(
     kw: str = "",
@@ -62,7 +75,7 @@ async def search_mp(
     session = DB.get_session()
     try:
         owner_id = _owner(current_user)
-        token, cookie = get_token_cookie(session, owner_id=owner_id, allow_global_fallback=True)
+        token, cookie = get_token_cookie(session, owner_id=owner_id, allow_global_fallback=False)
         if not token or not cookie:
             raise HTTPException(
                 status_code=status.HTTP_201_CREATED,
@@ -194,13 +207,49 @@ async def update_mps(
                     data={"time_span":time_span}
                 )
         result=[]    
-        def UpArt(mp):
+        token, cookie, user_agent = _resolve_gather_auth(
+            session,
+            owner_id=_owner(current_user),
+            allow_global_fallback=False,
+        )
+        if not token or not cookie:
+            return error_response(
+                code=40101,
+                message="当前账号公众号授权失效，请重新扫码授权后重试",
+            )
+
+        mp_payload = {
+            "faker_id": str(mp.faker_id or ""),
+            "id": str(mp.id or ""),
+            "mp_name": str(mp.mp_name or ""),
+        }
+        if not mp_payload["faker_id"] or not mp_payload["id"]:
+            return error_response(
+                code=40403,
+                message="公众号信息不完整，无法启动更新",
+            )
+
+        def UpArt(payload: dict):
+            nonlocal result
             from core.wx import WxGather
-            wx=WxGather().Model()
-            wx.get_Articles(mp.faker_id,Mps_id=mp.id,Mps_title=mp.mp_name,CallBack=UpdateArticle,start_page=start_page,MaxPage=end_page)
-            result=wx.articles
+            wx = WxGather().Model()
+            try:
+                wx.get_Articles(
+                    payload.get("faker_id"),
+                    Mps_id=payload.get("id"),
+                    Mps_title=payload.get("mp_name", ""),
+                    CallBack=UpdateArticle,
+                    start_page=start_page,
+                    MaxPage=end_page,
+                    token=token,
+                    cookie=cookie,
+                    user_agent=user_agent,
+                )
+                result = wx.articles
+            except Exception as e:
+                print(f"更新公众号文章线程异常: {e}")
         import threading
-        threading.Thread(target=UpArt,args=(mp,)).start()
+        threading.Thread(target=UpArt, args=(mp_payload,), daemon=True).start()
         return success_response({
             "time_span":time_span,
             "list":result,
@@ -330,11 +379,29 @@ async def add_mp(
         
         feed = existing_feed if existing_feed else new_feed
          #在这里实现第一次添加获取公众号文章
+        fetch_scheduled = False
         if not existing_feed:
             from core.queue import TaskQueue
             from core.wx import WxGather
             Max_page=int(cfg.get("max_page","2"))
-            TaskQueue.add_task( WxGather().Model().get_Articles,faker_id=feed.faker_id,Mps_id=feed.id,CallBack=UpdateArticle,MaxPage=Max_page,Mps_title=mp_name)
+            token, cookie, user_agent = _resolve_gather_auth(
+                session,
+                owner_id=owner_id,
+                allow_global_fallback=False,
+            )
+            if token and cookie:
+                TaskQueue.add_task(
+                    WxGather().Model().get_Articles,
+                    faker_id=feed.faker_id,
+                    Mps_id=feed.id,
+                    CallBack=UpdateArticle,
+                    MaxPage=Max_page,
+                    Mps_title=mp_name,
+                    token=token,
+                    cookie=cookie,
+                    user_agent=user_agent,
+                )
+                fetch_scheduled = True
             
         return success_response({
             "id": feed.id,
@@ -343,7 +410,8 @@ async def add_mp(
             "mp_intro": feed.mp_intro,
             "status": feed.status,
             "faker_id":mp_id,
-            "created_at": feed.created_at.isoformat()
+            "created_at": feed.created_at.isoformat(),
+            "fetch_scheduled": fetch_scheduled,
         })
     except Exception as e:
         session.rollback()

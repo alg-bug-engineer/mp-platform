@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Engine,Text,event
+from sqlalchemy import create_engine, Engine,Text,event, inspect, text
 from sqlalchemy.orm import sessionmaker, declarative_base,scoped_session
 from sqlalchemy import Column, Integer, String, DateTime
 from typing import Optional, List
@@ -51,9 +51,38 @@ class Db:
                                      connect_args={"check_same_thread": False} if con_str.startswith('sqlite:///') else {}
                                      )
             self.session_factory=self.get_session_factory()
+            self._ensure_user_profile_columns()
         except Exception as e:
             print(f"Error creating database connection: {e}")
             raise
+
+    def _ensure_user_profile_columns(self) -> None:
+        """Best-effort online schema patch for old users table."""
+        if not self.engine:
+            return
+        try:
+            inspector = inspect(self.engine)
+            if not inspector.has_table("users"):
+                return
+            existing = {str(col.get("name") or "").strip() for col in inspector.get_columns("users")}
+            needed = {
+                "wechat_app_id": "VARCHAR(128) DEFAULT ''",
+                "wechat_app_secret": "VARCHAR(256) DEFAULT ''",
+            }
+            for name, ddl in needed.items():
+                if name in existing:
+                    continue
+                stmt = text(f"ALTER TABLE users ADD COLUMN {name} {ddl}")
+                try:
+                    with self.engine.begin() as conn:
+                        conn.execute(stmt)
+                except Exception as e:
+                    msg = str(e).lower()
+                    if "duplicate column" in msg or "already exists" in msg:
+                        continue
+                    raise
+        except Exception as e:
+            print_warning(f"[{self.tag}] ensure users schema failed: {e}")
     def create_tables(self):
         """Create all tables defined in models"""
         from core.models.base import Base as B # 导入所有模型

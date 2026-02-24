@@ -63,30 +63,54 @@ class WxGather:
         else:
             from core.wx.model.api import MpsApi
             wx=MpsApi()
+        if self._runtime_token and self._runtime_cookie:
+            wx.set_runtime_auth(
+                token=self._runtime_token,
+                cookie=self._runtime_cookie,
+                user_agent=self._runtime_user_agent,
+            )
         return wx
     def __init__(self,is_add:bool=False):
         self.articles=[]
         self.is_add=is_add
         self._cookies={}
+        self._runtime_token = ""
+        self._runtime_cookie = ""
+        self._runtime_user_agent = ""
         self.start_time = None  # 记录开始时间
         session=  requests.Session()
         timeout = (5, 10)  
         session.timeout = timeout
         self.session=session
         self.get_token()
+    def set_runtime_auth(self, token: str = "", cookie: str = "", user_agent: str = ""):
+        self._runtime_token = str(token or "").strip()
+        self._runtime_cookie = str(cookie or "").strip()
+        self._runtime_user_agent = str(user_agent or "").strip()
+        if self._runtime_token and self._runtime_cookie:
+            self.token = self._runtime_token
+            self.cookies = self._runtime_cookie
+            self.user_agent = self._runtime_user_agent or random.choice(USER_AGENTS)
+            self.headers = {
+                "Cookie": self.cookies,
+                "User-Agent": self.user_agent
+            }
     def get_token(self):
         cfg.reload()
         wx_cfg.reload()
         self.Gather_Content=cfg.get('gather.content',False)
-        self.cookies = wx_cfg.get('cookie', '')
-        self.token=wx_cfg.get('token','')
-        # 随机选择一个 User-Agent
-        self.user_agent = cfg.get('user_agent', '')
-        user_agent = random.choice(USER_AGENTS)
-        self.user_agent=user_agent
+        if self._runtime_token and self._runtime_cookie:
+            self.cookies = self._runtime_cookie
+            self.token = self._runtime_token
+            self.user_agent = self._runtime_user_agent or random.choice(USER_AGENTS)
+        else:
+            self.cookies = wx_cfg.get('cookie', '')
+            self.token=wx_cfg.get('token','')
+            # 随机选择一个 User-Agent
+            self.user_agent = cfg.get('user_agent', '') or random.choice(USER_AGENTS)
         self.headers = {
             "Cookie":self.cookies,
-            "User-Agent": user_agent
+            "User-Agent": self.user_agent
         }
     def fix_header(self,url):
          user_agent = random.choice(USER_AGENTS)
@@ -202,8 +226,10 @@ class WxGather:
     
     
     
-    def Start(self,mp_id=None):
+    def Start(self,mp_id=None,token: str = "", cookie: str = "", user_agent: str = ""):
         self.articles=[]
+        if token and cookie:
+            self.set_runtime_auth(token=token, cookie=cookie, user_agent=user_agent)
         self.get_token()
         if self.token=="" or self.token is None:
              self.Error("请先扫码登录公众号平台")

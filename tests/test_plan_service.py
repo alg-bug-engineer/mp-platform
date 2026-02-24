@@ -7,6 +7,7 @@ from core.plan_service import (
     validate_ai_action,
     consume_ai_usage,
 )
+from core.product_mode import get_product_mode, set_product_mode
 
 
 class DummyUser:
@@ -23,6 +24,13 @@ class DummyUser:
 
 
 class PlanServiceTestCase(unittest.TestCase):
+    def setUp(self):
+        self.origin_mode = get_product_mode()
+        set_product_mode("commercial")
+
+    def tearDown(self):
+        set_product_mode(self.origin_mode)
+
     def test_default_plan_is_initialized(self):
         user = DummyUser()
         ensure_user_plan_defaults(user, preferred_tier="free")

@@ -73,6 +73,29 @@
             <template #prefix><icon-email /></template>
           </a-input>
         </a-form-item>
+
+        <a-divider orientation="left">公众号接口配置</a-divider>
+        <a-alert style="margin-bottom: 12px;" type="info">
+          这里填写公众号 AppID / AppSecret 后，AI 草稿同步会自动读取；未填写时，同步会提示先到个人中心配置。
+        </a-alert>
+        <a-form-item label="公众号 AppID">
+          <a-input
+            v-model="form.wechat_app_id"
+            placeholder="wx..."
+            allow-clear
+          />
+        </a-form-item>
+        <a-form-item label="公众号 AppSecret">
+          <a-input-password
+            v-model="form.wechat_app_secret"
+            placeholder="留空表示不修改"
+            allow-clear
+          />
+          <div class="muted-tip">
+            已配置状态：{{ form.wechat_app_secret_set ? '已设置' : '未设置' }}
+          </div>
+          <a-checkbox v-model="form.clear_wechat_app_secret">清空已保存的 AppSecret</a-checkbox>
+        </a-form-item>
         
         <a-form-item>
           <a-space>
@@ -101,7 +124,11 @@ const form = ref({
   username: '',
   nickname: '',
   email: '',
-  avatar: ''
+  avatar: '',
+  wechat_app_id: '',
+  wechat_app_secret: '',
+  wechat_app_secret_set: false,
+  clear_wechat_app_secret: false,
 })
 
 const rules = {
@@ -158,7 +185,11 @@ const fetchUserInfo = async () => {
       username: res.username,
       nickname: res.nickname || res.username,
       email: res.email || '',
-      avatar: res.avatar 
+      avatar: res.avatar,
+      wechat_app_id: res.wechat_app_id || '',
+      wechat_app_secret: '',
+      wechat_app_secret_set: !!res.wechat_app_secret_set,
+      clear_wechat_app_secret: false,
     }
   } catch (error) {
     router.push('/login')
@@ -171,6 +202,9 @@ const handleSubmit = async () => {
     let response=await updateUserInfo(form.value)
     if (response.code === 0){
       Message.success(response?.message || '更新成功')
+      form.value.wechat_app_secret = ''
+      form.value.clear_wechat_app_secret = false
+      await fetchUserInfo()
     }
 }
 
@@ -222,5 +256,11 @@ onMounted(() => {
 
 .arco-form-item {
   margin-bottom: 20px;
+}
+
+.muted-tip {
+  color: #8a8a8a;
+  font-size: 12px;
+  margin-top: 6px;
 }
 </style>

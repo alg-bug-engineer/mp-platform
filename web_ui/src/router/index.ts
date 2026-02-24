@@ -15,6 +15,8 @@ import NovelReader from '../views/NovelReader.vue'
 import AiStudio from '../views/AiStudio.vue'
 import PlanManagement from '../views/PlanManagement.vue'
 import BillingCenter from '../views/BillingCenter.vue'
+import AnalyticsDashboard from '../views/AnalyticsDashboard.vue'
+import { loadRuntimeSettings } from '@/utils/runtime'
 
 const routes = [
   {
@@ -143,11 +145,7 @@ const routes = [
       },
       {
         path: 'workspace/draftbox',
-        name: 'AiDraftbox',
-        component: AiStudio,
-        meta: {
-          requiresAuth: true
-        }
+        redirect: '/workspace/studio',
       },
       {
         path: 'billing',
@@ -155,7 +153,8 @@ const routes = [
         alias: ['/workspace/billing'],
         component: BillingCenter,
         meta: {
-          requiresAuth: true
+          requiresAuth: true,
+          hideInAllFree: true,
         }
       },
       {
@@ -166,6 +165,16 @@ const routes = [
         meta: {
           requiresAuth: true,
           permissions: ['admin']
+        }
+      },
+      {
+        path: 'admin/analytics',
+        name: 'AnalyticsDashboard',
+        alias: ['/workspace/admin/analytics'],
+        component: AnalyticsDashboard,
+        meta: {
+          requiresAuth: true,
+          permissions: ['admin'],
         }
       },
       {
@@ -226,13 +235,15 @@ const router = createRouter({
 const canonicalPathMap: Record<string, string> = {
   '/add-subscription': '/workspace/subscriptions',
   '/ai/studio': '/workspace/studio',
-  '/draftbox': '/workspace/draftbox',
+  '/draftbox': '/workspace/studio',
+  '/workspace/draftbox': '/workspace/studio',
   '/billing': '/workspace/billing',
   '/ops': '/workspace/ops',
   '/message-tasks': '/workspace/ops/messages',
   '/tags': '/workspace/ops/tags',
   '/configs': '/workspace/ops/configs',
   '/admin/plans': '/workspace/admin/plans',
+  '/admin/analytics': '/workspace/admin/analytics',
 }
 
 router.beforeEach(async (to, from, next) => {
@@ -272,6 +283,17 @@ router.beforeEach(async (to, from, next) => {
     // 确保从正确路径导入verifyToken
     const { verifyToken, getCurrentUser } = await import('@/api/auth')
     await verifyToken()
+
+    const runtime = await loadRuntimeSettings()
+    if (runtime?.is_all_free && to.meta.hideInAllFree) {
+      return next({
+        path: '/workspace/content',
+        query: {
+          notice: 'billing_hidden',
+          target: to.path,
+        },
+      })
+    }
 
     const requiredPermissions = (to.meta.permissions || []) as string[]
     if (requiredPermissions.length > 0) {

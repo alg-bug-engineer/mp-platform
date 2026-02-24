@@ -79,7 +79,7 @@ postgresql://rss_user:pass123456@postgres:5432/we_mp_rss
 
 ## 使用文档
 
-- 启动与使用指南：`docs/启动与使用指南.md`
+- 启动与使用指南：`docs/guides/启动与使用指南.md`
 - 清理历史文件脚本：`script/clean_history.sh`
 
 ## 商业化交付说明

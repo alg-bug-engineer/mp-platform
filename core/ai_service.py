@@ -7,6 +7,9 @@ import uuid
 import time
 import html
 import logging
+import hashlib
+import io
+from urllib.parse import urlparse
 
 import requests
 import yaml
@@ -15,6 +18,8 @@ from fastapi import HTTPException, status
 from core.config import cfg
 from core.models.ai_profile import AIProfile
 from core.models.ai_publish_task import AIPublishTask
+from core.models.ai_compose_result import AIComposeResult
+from core.prompt_templates import build_natural_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -158,8 +163,12 @@ def get_compose_options() -> dict:
     platforms = rules.get("platform_templates", {})
     styles = rules.get("style_templates", {})
     lengths = rules.get("length_templates", {})
+    channel = str(cfg.get("ai.jimeng.channel", "local") or "local").strip().lower()
     req_key = str(cfg.get("ai.jimeng.req_key", "jimeng_t2i_v40")).strip()
     fallback_req_keys = str(cfg.get("ai.jimeng.fallback_req_keys", "jimeng_t2i_v30") or "")
+    local_base_url = str(cfg.get("ai.jimeng.local_base_url", "http://127.0.0.1:5100")).strip()
+    local_base_urls = _build_local_base_url_candidates()
+    local_model = str(cfg.get("ai.jimeng.local_model", "jimeng-4.5")).strip()
     req_key_candidates = _build_req_keys(req_key, fallback_req_keys)
     return {
         "platforms": [
@@ -174,9 +183,13 @@ def get_compose_options() -> dict:
         "styles": [{"key": k, "label": k, "desc": v} for k, v in styles.items()],
         "lengths": [{"key": k, "label": v} for k, v in lengths.items()],
         "jimeng": {
+            "channel": channel,
             "req_key": req_key,
             "fallback_req_keys": [k for k in str(fallback_req_keys).split(",") if str(k).strip()],
             "req_key_candidates": req_key_candidates,
+            "local_base_url": local_base_url,
+            "local_base_urls": local_base_urls,
+            "local_model": local_model,
         },
         "rules_file": _rules_file_path(),
     }
@@ -280,6 +293,75 @@ def profile_to_dict(profile: AIProfile, include_secret: bool = False) -> dict:
     }
 
 
+def _platform_provider_config(include_secret: bool = False) -> Dict[str, Any]:
+    base_url = str(
+        cfg.get("ai.provider.base_url", "")
+        or os.getenv("AI_PROVIDER_BASE_URL", "")
+        or DEFAULT_BASE_URL
+    ).strip() or DEFAULT_BASE_URL
+    model_name = str(
+        cfg.get("ai.provider.model_name", "")
+        or os.getenv("AI_PROVIDER_MODEL_NAME", "")
+        or DEFAULT_MODEL
+    ).strip() or DEFAULT_MODEL
+    api_key = str(
+        cfg.get("ai.provider.api_key", "")
+        or os.getenv("AI_PROVIDER_API_KEY", "")
+        or os.getenv("KIMI_API_KEY", "")
+        or ""
+    ).strip()
+    try:
+        temperature = int(
+            cfg.get("ai.provider.temperature", None)
+            or os.getenv("AI_PROVIDER_TEMPERATURE", 70)
+            or 70
+        )
+    except Exception:
+        temperature = 70
+    temperature = max(0, min(100, temperature))
+    return {
+        "provider_name": "openai-compatible",
+        "base_url": base_url,
+        "model_name": model_name,
+        "api_key": api_key if include_secret else _mask_key(api_key),
+        "temperature": temperature,
+        "platform_managed": True,
+    }
+
+
+def get_platform_profile(mask_secret: bool = True) -> Dict[str, Any]:
+    return _platform_provider_config(include_secret=not mask_secret)
+
+
+def _resolve_runtime_provider(profile: Optional[AIProfile]) -> Dict[str, Any]:
+    force_platform = bool(cfg.get("ai.provider.force_platform", True))
+    platform_cfg = _platform_provider_config(include_secret=True)
+
+    profile_base = str(getattr(profile, "base_url", "") or "").strip()
+    profile_model = str(getattr(profile, "model_name", "") or "").strip()
+    profile_key = str(getattr(profile, "api_key", "") or "").strip()
+    try:
+        profile_temp = int(getattr(profile, "temperature", 70) or 70)
+    except Exception:
+        profile_temp = 70
+    profile_temp = max(0, min(100, profile_temp))
+
+    if force_platform:
+        return {
+            "base_url": platform_cfg["base_url"],
+            "model_name": platform_cfg["model_name"],
+            "api_key": platform_cfg["api_key"],
+            "temperature": platform_cfg["temperature"],
+        }
+
+    return {
+        "base_url": platform_cfg["base_url"] or profile_base or DEFAULT_BASE_URL,
+        "model_name": platform_cfg["model_name"] or profile_model or DEFAULT_MODEL,
+        "api_key": platform_cfg["api_key"] or profile_key,
+        "temperature": platform_cfg["temperature"] if platform_cfg["temperature"] is not None else profile_temp,
+    }
+
+
 def _strip_html(text: str) -> str:
     raw = text or ""
     raw = re.sub(r"<script[\s\S]*?</script>", " ", raw, flags=re.IGNORECASE)
@@ -343,11 +425,17 @@ def build_prompt(
         user = (
             base
             + ext
+            + "分析目标：提炼爆款点与关键信息，不做全文重写。\n"
             + "请输出 Markdown，结构如下：\n"
-            + "- 核心主题（1-2句）\n"
-            + "- 目标受众（画像+关注点）\n"
-            + "- 亮点与问题（各3条）\n"
-            + "- 改写建议（可执行清单）\n"
+            + "## 1) 核心主题（1-2句）\n"
+            + "## 2) 爆款点拆解（列表，至少5条）\n"
+            + "- 每条包含：爆点描述、证据句、可复用写法\n"
+            + "## 3) 重点信息凝练（表格）\n"
+            + "| 信息点 | 原文依据 | 受众价值 | 写作建议 |\n"
+            + "| --- | --- | --- | --- |\n"
+            + "## 4) 风险与短板（列表，至少3条）\n"
+            + "## 5) 可执行写作清单（3-5条）\n"
+            + "输出要求：分析结果必须以列表和表格为主，避免空泛评价。\n"
             + anti_ai_rules
         )
         return system, user
@@ -358,7 +446,9 @@ def build_prompt(
             base
             + ext
             + f"改写目标风格：{style_desc}\n"
+            + "仿写目标：高仿原文的信息结构、叙事节奏与表达气质，但必须换用新句子，不得逐句照搬。\n"
             + "请直接输出完整改写成稿（标题+正文+结尾行动建议），正文以段落推进。\n"
+            + "要求：保留关键观点与逻辑顺序，保留原文的情绪强度与节奏密度。\n"
             + anti_ai_rules
         )
         return system, user
@@ -380,17 +470,47 @@ def build_prompt(
         + "平台约束：\n"
         + (platform_constraints if platform_constraints else "- 无")
         + "\n输出要求：\n"
-        + "1. 直接给可发布成稿，不要输出解释过程。\n"
-        + "2. 标题必须具体克制，不用万能标题。\n"
-        + "3. 正文以段落叙述为主，避免大量子标题与列表。\n"
-        + "4. 每段尽量包含可执行建议、实例或观察结论。\n"
-        + (f"5. 文末新增“配图建议”小节，给出 {image_count} 条具体画面描述与中文绘图提示词。\n" if image_count > 0 else "")
+        + "1. 创作目标是全新成稿，不能只是改写原文句子。\n"
+        + "2. 直接给可发布成稿，不要输出解释过程。\n"
+        + "3. 标题必须具体克制，不用万能标题。\n"
+        + "4. 正文以段落叙述为主，避免大量子标题与列表。\n"
+        + "5. 每段尽量包含可执行建议、实例或观察结论。\n"
+        + (f"6. 文末新增“配图建议”小节，给出 {image_count} 条具体画面描述与中文绘图提示词。\n" if image_count > 0 else "")
         + anti_ai_rules
     )
     return system, user
 
 
-def build_image_prompts(title: str, platform: str, style: str, image_count: int) -> List[str]:
+def _extract_markdown_text_blocks(content: str) -> List[str]:
+    text = str(content or "").strip()
+    if not text:
+        return []
+    text = re.sub(r"```[\s\S]*?```", " ", text)
+    blocks: List[str] = []
+    for chunk in re.split(r"\n\s*\n", text):
+        raw = str(chunk or "").strip()
+        if not raw:
+            continue
+        if re.match(r"^!\[[^\]]*\]\((https?://[^)\s]+)[^)]*\)\s*$", raw, flags=re.IGNORECASE):
+            continue
+        if re.match(r"^<img\b", raw, flags=re.IGNORECASE):
+            continue
+        raw = re.sub(r"^#{1,6}\s+", "", raw)
+        raw = re.sub(r"\|", " ", raw)
+        raw = re.sub(r"\s+", " ", raw).strip()
+        if len(raw) < 8:
+            continue
+        blocks.append(raw[:220])
+    return blocks
+
+
+def build_image_prompts(
+    title: str,
+    platform: str,
+    style: str,
+    image_count: int,
+    content: str = "",
+) -> List[str]:
     count = max(0, min(int(image_count or 0), 9))
     if count <= 0:
         return []
@@ -426,6 +546,10 @@ def build_image_prompts(title: str, platform: str, style: str, image_count: int)
     else:
         topic_hint = "the core article topic"
 
+    text_blocks = _extract_markdown_text_blocks(content)
+    cover_scene = _compact_text_for_scene(text_blocks[0], max_len=180) if text_blocks else topic_hint
+    section_blocks = text_blocks[1:] if len(text_blocks) > 1 else []
+
     platform_key = str(platform or "wechat").strip().lower()
     platform_hint = platform_hint_map.get(platform_key, "editorial social content visual")
     style_hint = style_hint_map.get(str(style or "").strip(), "clean modern editorial style")
@@ -433,12 +557,20 @@ def build_image_prompts(title: str, platform: str, style: str, image_count: int)
     prompts: List[str] = []
     for i in range(1, count + 1):
         scene_hint = scene_variants[(i - 1) % len(scene_variants)]
+        if i == 1:
+            scene_focus = f"cover scene for opening section: {cover_scene}"
+        elif section_blocks:
+            idx = min(len(section_blocks) - 1, int((i - 2) * len(section_blocks) / max(1, count - 1)))
+            scene_focus = f"section illustration focus: {_compact_text_for_scene(section_blocks[idx], max_len=180)}"
+        else:
+            scene_focus = f"section illustration focus around topic: {topic_hint}"
         prompts.append(
             "Create a high-quality editorial illustration. "
             f"Topic: {topic_hint}. "
             f"Platform intent: {platform_hint}. "
             f"Style intent: {style_hint}. "
             f"Scene variation {i}: {scene_hint}. "
+            f"Content focus: {scene_focus}. "
             "Use realistic lighting, clear focal subject, layered composition, natural color harmony, "
             "high detail, 4k quality. "
             "English visual semantics only. "
@@ -447,9 +579,74 @@ def build_image_prompts(title: str, platform: str, style: str, image_count: int)
     return prompts
 
 
+def build_inline_image_prompt(
+    title: str,
+    selected_text: str,
+    platform: str,
+    style: str,
+    context_text: str = "",
+) -> str:
+    platform_hint_map = {
+        "wechat": "professional editorial visual for a trustworthy long-form article",
+        "xiaohongshu": "lifestyle social visual with authentic daily-life atmosphere",
+        "zhihu": "knowledge-oriented visual with rational and structured mood",
+        "twitter": "fast-scrolling social visual with bold focal point and high contrast",
+    }
+    style_hint_map = {
+        "专业深度": "insightful, clean, expert-level visual language",
+        "故事共鸣": "human-centered storytelling mood with emotional details",
+        "实操清单": "practical, step-by-step, instructional scene composition",
+        "犀利观点": "sharp perspective, strong contrast, decisive composition",
+    }
+    platform_key = str(platform or "wechat").strip().lower()
+    platform_hint = platform_hint_map.get(platform_key, "editorial social content visual")
+    style_hint = style_hint_map.get(str(style or "").strip(), "clean modern editorial style")
+    topic_hint = _compact_text_for_scene(title or "article topic", max_len=100) or "article topic"
+    selected_hint = _compact_text_for_scene(selected_text, max_len=180) or "core selected paragraph"
+    context_hint = _compact_text_for_scene(context_text, max_len=140) or "article context"
+    return (
+        "Create a high-quality editorial illustration for one paragraph in a long-form article. "
+        f"Topic: {topic_hint}. "
+        f"Platform intent: {platform_hint}. "
+        f"Style intent: {style_hint}. "
+        f"Paragraph focus: {selected_hint}. "
+        f"Context: {context_hint}. "
+        "Use realistic lighting, clear focal subject, layered composition, natural color harmony, high detail, 4k quality. "
+        "English visual semantics only. "
+        "No text, no letters, no Chinese characters, no watermark, no logo, no UI."
+    )
+
+
+def _is_markdown_image_block(text: str) -> bool:
+    block = str(text or "").strip()
+    if not block:
+        return False
+    if re.match(r"^!\[[^\]]*\]\((https?://[^)\s]+)[^)]*\)\s*$", block, flags=re.IGNORECASE):
+        return True
+    if re.match(r"^<img\b[^>]*>\s*$", block, flags=re.IGNORECASE):
+        return True
+    return False
+
+
+def _is_plain_text_block(text: str) -> bool:
+    block = str(text or "").strip()
+    if not block:
+        return False
+    if _is_markdown_image_block(block):
+        return False
+    if re.match(r"^#{1,6}\s+", block):
+        return False
+    cleaned = re.sub(r"[\[\]()`*_>#|!-]", " ", block)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return len(cleaned) >= 8
+
+
 def merge_image_urls_into_markdown(content: str, image_urls: List[str]) -> str:
     """
-    将图片 URL 以 Markdown 图片语法合并进正文（去重），确保草稿正文包含插图。
+    将图片 URL 以 Markdown 图片语法合并进正文（去重）。
+    规则：
+    - 第一张图片作为封面图，插入首个正文段落后
+    - 其余图片按正文段落均匀分布为内容插图
     """
     base = str(content or "").strip()
     urls = []
@@ -472,15 +669,58 @@ def merge_image_urls_into_markdown(content: str, image_urls: List[str]) -> str:
     if not pending:
         return base
 
-    lines = [f"![配图{i + 1}]({url})" for i, url in enumerate(pending)]
-    block = "\n".join(lines)
     if not base:
-        return block
-    return f"{base}\n\n{block}"
+        return "\n\n".join([f"![配图{i + 1}]({url})" for i, url in enumerate(pending)])
+
+    blocks = [str(x or "").strip() for x in re.split(r"\n\s*\n", base) if str(x or "").strip()]
+    if not blocks:
+        return "\n\n".join([f"![配图{i + 1}]({url})" for i, url in enumerate(pending)])
+
+    text_indexes = [i for i, blk in enumerate(blocks) if _is_plain_text_block(blk)]
+    cover_url = pending[0]
+    content_urls = pending[1:]
+
+    cover_anchor = text_indexes[0] if text_indexes else -1
+    insertion_map: Dict[int, List[str]] = {}
+    if cover_anchor >= 0:
+        insertion_map.setdefault(cover_anchor, []).append(f"![封面图]({cover_url})")
+    else:
+        insertion_map.setdefault(-1, []).append(f"![封面图]({cover_url})")
+
+    if content_urls:
+        candidate_anchors = [idx for idx in text_indexes if idx > cover_anchor]
+        if not candidate_anchors:
+            candidate_anchors = [len(blocks) - 1]
+        for idx, url in enumerate(content_urls, start=1):
+            pos = min(
+                len(candidate_anchors) - 1,
+                int((idx - 1) * len(candidate_anchors) / max(1, len(content_urls))),
+            )
+            anchor = candidate_anchors[pos]
+            insertion_map.setdefault(anchor, []).append(f"![内容配图{idx}]({url})")
+
+    merged_blocks: List[str] = []
+    if insertion_map.get(-1):
+        merged_blocks.extend(insertion_map[-1])
+    for i, blk in enumerate(blocks):
+        merged_blocks.append(blk)
+        if insertion_map.get(i):
+            merged_blocks.extend(insertion_map[i])
+    return "\n\n".join([x for x in merged_blocks if str(x or "").strip()])
 
 
 def call_openai_compatible(profile: AIProfile, system_prompt: str, user_prompt: str) -> str:
-    if str(profile.base_url or "").strip().lower().startswith("mock://") or str(profile.api_key or "").strip().lower() in ["mock", "mock-key", "test-mock"]:
+    runtime = _resolve_runtime_provider(profile)
+    base_url = str(runtime.get("base_url") or "").strip()
+    api_key = str(runtime.get("api_key") or "").strip()
+    model_name = str(runtime.get("model_name") or "").strip()
+    try:
+        temperature = int(runtime.get("temperature") or 70)
+    except Exception:
+        temperature = 70
+    temperature = max(0, min(100, temperature))
+
+    if base_url.lower().startswith("mock://") or api_key.lower() in ["mock", "mock-key", "test-mock"]:
         title = "未命名主题"
         m = re.search(r"素材标题：([^\n]+)", user_prompt or "")
         if m:
@@ -497,27 +737,29 @@ def call_openai_compatible(profile: AIProfile, system_prompt: str, user_prompt: 
             "- 组织结构\n"
             "- 输出发布稿\n"
         )
-    if not profile.api_key:
+    if not api_key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="请先在 AI 配置中填写 API Key"
+            detail="平台 AI 服务未配置，请联系管理员"
         )
 
-    endpoint = f"{profile.base_url.rstrip('/')}/chat/completions"
+    endpoint = f"{base_url.rstrip('/')}/chat/completions"
     headers = {
-        "Authorization": f"Bearer {profile.api_key}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     payload = {
-        "model": profile.model_name,
-        "temperature": float(profile.temperature) / 100.0,
+        "model": model_name,
+        "temperature": float(temperature) / 100.0,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
     }
     try:
-        resp = requests.post(endpoint, json=payload, headers=headers, timeout=180)
+        # 显式序列化 JSON，确保中文不被转义
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        resp = requests.post(endpoint, data=payload_json.encode('utf-8'), headers={**headers, 'Content-Type': 'application/json; charset=utf-8'}, timeout=180)
         if resp.status_code >= 400:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -591,6 +833,98 @@ def refine_draft(
         return text
 
 
+def _looks_like_markdown(text: str) -> bool:
+    source = str(text or "")
+    if not source.strip():
+        return False
+    patterns = [
+        r"(?m)^\s*#{1,6}\s+\S+",
+        r"(?m)^\s*[-*+]\s+\S+",
+        r"(?m)^\s*\d+\.\s+\S+",
+        r"(?m)\*\*[^*]+\*\*",
+        r"(?m)^\s*\|.+\|\s*$",
+        r"(?m)!\[[^\]]*\]\([^)]+\)",
+        r"(?m)\[[^\]]+\]\([^)]+\)",
+    ]
+    return any(re.search(p, source) for p in patterns)
+
+
+def _to_markdown_heading_title(title: str, fallback: str = "AI 草稿") -> str:
+    value = str(title or "").strip()
+    if not value:
+        return fallback
+    value = re.sub(r"^#{1,6}\s+", "", value).strip()
+    return value or fallback
+
+
+def _split_plain_paragraphs(text: str) -> List[str]:
+    source = str(text or "").replace("\r\n", "\n")
+    rows = [str(x or "").strip() for x in re.split(r"\n\s*\n", source)]
+    paragraphs = [x for x in rows if x]
+    if paragraphs:
+        return paragraphs
+    rows = [str(x or "").strip() for x in source.split("\n")]
+    rows = [x for x in rows if x]
+    return rows
+
+
+def ensure_markdown_content(mode: str, title: str, text: str) -> str:
+    source = str(text or "").strip()
+    if not source:
+        return source
+    if _looks_like_markdown(source):
+        return source
+
+    heading = _to_markdown_heading_title(title)
+    paragraphs = _split_plain_paragraphs(source)
+    if not paragraphs:
+        return f"# {heading}\n\n{source}"
+
+    bullet_candidates = []
+    for para in paragraphs[:3]:
+        sentence = re.split(r"[。！？.!?]", para)[0].strip()
+        sentence = sentence or para[:42].strip()
+        if sentence:
+            bullet_candidates.append(sentence[:60])
+    bullet_candidates = [x for i, x in enumerate(bullet_candidates) if x and x not in bullet_candidates[:i]]
+
+    if mode == "analyze":
+        lines = [
+            f"# {heading}｜分析结果",
+            "",
+            "## 核心结论",
+            paragraphs[0],
+            "",
+            "## 重点信息",
+        ]
+        if bullet_candidates:
+            for idx, item in enumerate(bullet_candidates, start=1):
+                lines.append(f"- **要点{idx}**：{item}")
+        else:
+            lines.append("- **要点1**：请结合原文补充关键信息。")
+        if len(paragraphs) > 1:
+            lines.extend(["", "## 写作建议", "\n\n".join(paragraphs[1:])])
+        return "\n".join(lines).strip()
+
+    lines = [
+        f"# {heading}",
+        "",
+        "## 导语",
+        paragraphs[0],
+        "",
+        "## 正文",
+        "\n\n".join(paragraphs[1:]) if len(paragraphs) > 1 else paragraphs[0],
+        "",
+        "## 关键要点",
+    ]
+    if bullet_candidates:
+        for idx, item in enumerate(bullet_candidates, start=1):
+            lines.append(f"- **要点{idx}**：{item}")
+    else:
+        lines.append("- **要点1**：请根据正文补充。")
+    return "\n".join(lines).strip()
+
+
 def _parse_jimeng_error(raw_error: str) -> Dict[str, str]:
     """从 SDK 抛错文本中尽量提取 code/message/request_id。"""
     text = str(raw_error or "").strip()
@@ -637,14 +971,198 @@ def _build_req_keys(primary_key: str, fallback_keys_raw: str) -> List[str]:
     return keys or ["jimeng_t2i_v40", "jimeng_t2i_v30"]
 
 
-def generate_images_with_jimeng(prompts: List[str]) -> Tuple[List[str], str]:
-    """
-    按 api.py 示例流程调用即梦（可选能力）。
-    未配置 AK/SK 或 SDK 不存在时自动降级。
-    """
-    if not prompts:
-        return [], ""
+def _normalize_jimeng_channel(channel: str) -> str:
+    value = str(channel or "").strip().lower()
+    return value if value in {"local", "api"} else "local"
 
+
+def _build_local_base_url_candidates() -> List[str]:
+    raw_multi = str(
+        cfg.get("ai.jimeng.local_base_urls", "")
+        or os.getenv("JIMENG_LOCAL_BASE_URLS", "")
+        or ""
+    ).strip()
+    configured_single = str(
+        cfg.get("ai.jimeng.local_base_url", "")
+        or os.getenv("JIMENG_LOCAL_BASE_URL", "")
+        or "http://127.0.0.1:5100"
+    ).strip()
+
+    candidates: List[str] = []
+
+    def _append(raw: str) -> None:
+        text = str(raw or "").strip().rstrip("/")
+        if not text:
+            return
+        if not re.match(r"^https?://", text, flags=re.IGNORECASE):
+            return
+        try:
+            parsed = urlparse(text)
+        except Exception:
+            return
+        host = str(parsed.hostname or "").strip()
+        if not host:
+            return
+        # 仅允许 5100 端口，屏蔽旧端口配置。
+        if parsed.port not in [None, 5100]:
+            return
+        norm = f"{parsed.scheme}://{host}:5100"
+        if norm not in candidates:
+            candidates.append(norm)
+
+    if raw_multi:
+        for item in re.split(r"[,\s;]+", raw_multi):
+            _append(item)
+
+    _append(configured_single)
+
+    for host in ["127.0.0.1", "localhost"]:
+        _append(f"http://{host}:5100")
+
+    # 容器内访问宿主机时，127.0.0.1 指向容器本身，补充 host.docker.internal。
+    if os.path.exists("/.dockerenv"):
+        _append("http://host.docker.internal:5100")
+
+    return candidates
+
+
+def _extract_local_image_urls(payload: Any) -> List[str]:
+    urls: List[str] = []
+    data = payload
+    if isinstance(payload, dict):
+        data = payload.get("data", payload)
+    if not isinstance(data, list):
+        return urls
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        for key in ("url", "image_url", "img_url"):
+            value = str(item.get(key) or "").strip()
+            if value.startswith("http://") or value.startswith("https://"):
+                urls.append(value)
+                break
+    return urls
+
+
+def _generate_images_with_jimeng_local(prompts: List[str]) -> Tuple[List[str], str, bool]:
+    if not prompts:
+        return [], "", True
+
+    base_urls = _build_local_base_url_candidates()
+    if not base_urls:
+        return [], "local 模式未配置接口地址", False
+    endpoint = str(cfg.get("ai.jimeng.local_endpoint", "/v1/images/generations") or "/v1/images/generations").strip()
+    if not endpoint.startswith("/"):
+        endpoint = f"/{endpoint}"
+    model = str(cfg.get("ai.jimeng.local_model", "") or os.getenv("JIMENG_LOCAL_MODEL", "jimeng-4.5")).strip()
+    ratio = str(cfg.get("ai.jimeng.local_ratio", "") or os.getenv("JIMENG_LOCAL_RATIO", "1:1")).strip()
+    resolution = str(cfg.get("ai.jimeng.local_resolution", "") or os.getenv("JIMENG_LOCAL_RESOLUTION", "2k")).strip()
+    timeout = int(cfg.get("ai.jimeng.local_timeout_seconds", 120) or 120)
+    send_extra_params = bool(cfg.get("ai.jimeng.local_send_extra_params", False))
+    local_token = str(cfg.get("ai.jimeng.local_token", "") or os.getenv("JIMENG_LOCAL_TOKEN", "")).strip()
+
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    if local_token:
+        headers["Authorization"] = f"Bearer {local_token}"
+
+    image_urls: List[str] = []
+    errors: List[str] = []
+    unreachable = False
+    active_base_urls = list(base_urls)
+    selected_base_url = ""
+    for prompt in prompts:
+        payload = {
+            "model": model,
+            "prompt": prompt,
+        }
+        # 默认与用户 curl 请求保持一致，必要时再开启扩展参数。
+        if send_extra_params:
+            if ratio:
+                payload["ratio"] = ratio
+            if resolution:
+                payload["resolution"] = resolution
+            payload["response_format"] = "url"
+        prompt_done = False
+        conn_errors = 0
+        for idx, base_url in enumerate(active_base_urls):
+            url = f"{base_url}{endpoint}"
+            try:
+                resp = requests.post(
+                    url,
+                    json=payload,
+                    headers=headers,
+                    timeout=(5, max(20, timeout)),
+                )
+            except requests.Timeout as e:
+                try:
+                    # 超时后再给一次更长读超时，避免误判 local 不可用。
+                    resp = requests.post(
+                        url,
+                        json=payload,
+                        headers=headers,
+                        timeout=(5, max(60, timeout * 2)),
+                    )
+                except Exception as e2:
+                    conn_errors += 1
+                    logger.warning(
+                        "Jimeng local channel timeout. url=%s read_timeout=%s retry_timeout=%s err=%s",
+                        url,
+                        max(20, timeout),
+                        max(60, timeout * 2),
+                        e2,
+                    )
+                    continue
+            except requests.RequestException as e:
+                conn_errors += 1
+                logger.warning("Jimeng local channel unavailable. url=%s err=%s", url, e)
+                continue
+
+            if int(resp.status_code or 0) >= 400:
+                text = str(resp.text or "")[:400]
+                errors.append(f"local[{base_url}] HTTP {resp.status_code}: {text}")
+                continue
+
+            try:
+                data = resp.json()
+            except Exception:
+                errors.append(f"local[{base_url}] 接口返回非 JSON 数据")
+                continue
+
+            urls = _extract_local_image_urls(data)
+            if urls:
+                image_urls.append(urls[0])
+                selected_base_url = base_url
+                if idx > 0:
+                    active_base_urls = [base_url] + [x for x in active_base_urls if x != base_url]
+                prompt_done = True
+                break
+
+            error_message = ""
+            if isinstance(data, dict):
+                error_message = str(data.get("message") or data.get("error") or "").strip()
+            errors.append(error_message or f"local[{base_url}] 接口未返回图片地址")
+
+        if not prompt_done and conn_errors >= len(active_base_urls):
+            unreachable = True
+
+    if image_urls and len(image_urls) == len(prompts):
+        suffix = f"，地址 {selected_base_url}" if selected_base_url else ""
+        return image_urls, f"即梦 local 生图成功（{len(image_urls)} 张{suffix}）", True
+
+    if image_urls:
+        detail = errors[0] if errors else "部分任务未返回图片"
+        return image_urls, f"即梦 local 生图部分成功（{len(image_urls)}/{len(prompts)}）：{detail}", True
+
+    if unreachable:
+        return [], "即梦 local 接口不可达", False
+    detail = errors[0] if errors else "即梦 local 生图失败"
+    return [], detail, False
+
+
+def _generate_images_with_jimeng_api(prompts: List[str]) -> Tuple[List[str], str]:
     ak = str(cfg.get("ai.jimeng.ak", "") or os.getenv("JIMENG_AK", "")).strip()
     sk = str(cfg.get("ai.jimeng.sk", "") or os.getenv("JIMENG_SK", "")).strip()
     req_key = str(cfg.get("ai.jimeng.req_key", "jimeng_t2i_v40")).strip()
@@ -759,6 +1277,177 @@ def generate_images_with_jimeng(prompts: List[str]) -> Tuple[List[str], str]:
     if errors:
         notices.append("；".join(errors[:2]))
     return image_urls, "；".join([n for n in notices if n])
+
+
+def generate_images_with_jimeng(prompts: List[str]) -> Tuple[List[str], str]:
+    """
+    即梦双通道：
+    - local：优先调用本地 jimeng-api 容器
+    - api：走 AK/SK 直连
+    默认 local，local 不可用时自动回退 api。
+    """
+    if not prompts:
+        return [], ""
+
+    channel = _normalize_jimeng_channel(cfg.get("ai.jimeng.channel", "local"))
+    if channel == "api":
+        return _generate_images_with_jimeng_api(prompts)
+
+    local_urls, local_notice, local_ok = _generate_images_with_jimeng_local(prompts)
+    if local_ok and local_urls:
+        return local_urls, local_notice
+
+    api_urls, api_notice = _generate_images_with_jimeng_api(prompts)
+    if api_urls:
+        fallback_notice = "local 通道不可用，已自动回退 AK/SK 通道"
+        if local_notice:
+            fallback_notice = f"{fallback_notice}（{local_notice}）"
+        merged = "；".join([x for x in [fallback_notice, api_notice] if x])
+        return api_urls, merged
+
+    merged = "；".join([x for x in [local_notice, api_notice] if x])
+    if not merged:
+        merged = "即梦生图不可用，已返回配图提示词"
+    return [], merged
+
+
+def _compact_text_for_scene(text: str, max_len: int = 120) -> str:
+    source = str(text or "").strip()
+    if not source:
+        return ""
+    source = re.sub(r"\s+", " ", source)
+    if len(source) <= max_len:
+        return source
+    return source[:max_len].rstrip() + "..."
+
+
+def build_compose_request_signature(
+    mode: str,
+    instruction: str = "",
+    create_options: Dict = None,
+) -> str:
+    options = create_options or {}
+    payload = {
+        "mode": str(mode or "").strip().lower(),
+        "instruction": str(instruction or "").strip(),
+        "platform": str(options.get("platform", "wechat")).strip().lower(),
+        "style": str(options.get("style", "专业深度")).strip(),
+        "length": str(options.get("length", "medium")).strip().lower(),
+        "image_count": max(0, int(options.get("image_count", 0) or 0)),
+        "audience": str(options.get("audience", "")).strip(),
+        "tone": str(options.get("tone", "")).strip(),
+        "generate_images": bool(options.get("generate_images", True)),
+    }
+    digest = hashlib.sha1(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    return digest
+
+
+def _parse_compose_result_json(row: AIComposeResult) -> Dict[str, Any]:
+    try:
+        payload = json.loads(str(row.result_json or "{}"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _parse_compose_request_payload_json(row: AIComposeResult) -> Dict[str, Any]:
+    try:
+        payload = json.loads(str(row.request_payload or "{}"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def serialize_compose_result_row(row: AIComposeResult) -> Dict[str, Any]:
+    if not row:
+        return {}
+    payload = _parse_compose_result_json(row)
+    request_payload = _parse_compose_request_payload_json(row)
+    result = {
+        "id": row.id,
+        "owner_id": row.owner_id,
+        "article_id": row.article_id,
+        "mode": row.mode,
+        "title": row.title or "",
+        "source_title": row.source_title or "",
+        "request_signature": row.request_signature or "",
+        "request_payload": request_payload,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+    result.update(payload)
+    return result
+
+
+def get_cached_compose_result(
+    session,
+    owner_id: str,
+    article_id: str,
+    mode: str,
+    request_signature: str = "",
+) -> Optional[Dict[str, Any]]:
+    owner = str(owner_id or "").strip()
+    article = str(article_id or "").strip()
+    mode_key = str(mode or "").strip().lower()
+    if not owner or not article or not mode_key:
+        return None
+    query = session.query(AIComposeResult).filter(
+        AIComposeResult.owner_id == owner,
+        AIComposeResult.article_id == article,
+        AIComposeResult.mode == mode_key,
+    )
+    if request_signature:
+        query = query.filter(AIComposeResult.request_signature == str(request_signature).strip())
+    row = query.order_by(AIComposeResult.updated_at.desc()).first()
+    if not row:
+        return None
+    data = serialize_compose_result_row(row)
+    data["from_cache"] = True
+    data["cached_at"] = data.get("updated_at")
+    return data
+
+
+def upsert_compose_result(
+    session,
+    owner_id: str,
+    article_id: str,
+    mode: str,
+    title: str,
+    source_title: str,
+    request_signature: str,
+    request_payload: Dict[str, Any],
+    result_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    owner = str(owner_id or "").strip()
+    article = str(article_id or "").strip()
+    mode_key = str(mode or "").strip().lower()
+    now = datetime.now()
+    if not owner or not article or not mode_key:
+        return {}
+    query = session.query(AIComposeResult).filter(
+        AIComposeResult.owner_id == owner,
+        AIComposeResult.article_id == article,
+        AIComposeResult.mode == mode_key,
+    )
+    if request_signature:
+        query = query.filter(AIComposeResult.request_signature == str(request_signature).strip())
+    row = query.first()
+    if not row:
+        row = AIComposeResult(
+            id=str(uuid.uuid4()),
+            owner_id=owner,
+            article_id=article,
+            mode=mode_key,
+            created_at=now,
+        )
+        session.add(row)
+    row.title = str(title or "").strip()
+    row.source_title = str(source_title or "").strip()
+    row.request_signature = str(request_signature or "").strip()
+    row.request_payload = json.dumps(request_payload or {}, ensure_ascii=False)
+    row.result_json = json.dumps(result_payload or {}, ensure_ascii=False)
+    row.updated_at = now
+    return serialize_compose_result_row(row)
 
 
 def _draft_dir() -> str:
@@ -1095,6 +1784,49 @@ def _pick_first_http_image_url(urls: List[str]) -> str:
     return ""
 
 
+def _trim_utf8_bytes(text: str, max_bytes: int) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    limit = max(1, int(max_bytes or 1))
+    if len(raw.encode("utf-8")) <= limit:
+        return raw
+    parts: List[str] = []
+    used = 0
+    for ch in raw:
+        chunk = ch.encode("utf-8")
+        if used + len(chunk) > limit:
+            break
+        parts.append(ch)
+        used += len(chunk)
+    return "".join(parts).strip()
+
+
+def _safe_wechat_title(raw_title: str) -> str:
+    """
+    清理并截断标题以符合微信公众号要求
+
+    微信公众号标题限制：
+    - 官方文档：不超过 64 个字符
+    - 实际测试：不同公众号对长度和特殊字符校验更严格
+    - 本函数：保守截断到 50 bytes，避免 errcode=45003
+    """
+    # 1. 清理控制字符和特殊符号
+    title = str(raw_title or "").strip()
+    # 移除换行符、制表符、回车等控制字符
+    title = re.sub(r'[\r\n\t\v\f]', ' ', title)
+    # 移除其他控制字符（Unicode 控制字符范围）
+    title = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', title)
+    # 压缩多个空格为单个空格
+    title = re.sub(r'\s+', ' ', title).strip()
+
+    # 2. 截断字节长度（50 bytes 是保守值，避免不同公众号的严格限制）
+    title = _trim_utf8_bytes(title, max_bytes=50)
+
+    # 3. 确保有有效标题
+    return title or "未命名草稿"
+
+
 def _is_wechat_cdn_url(url: str) -> bool:
     text = str(url or "").strip().lower()
     return "mmbiz.qpic.cn" in text or "mmbiz.qlogo.cn" in text
@@ -1199,13 +1931,39 @@ def _try_upload_article_img_to_wechat(token: str, cookie: str, image_url: str) -
 
     def _upload_image_bytes_via_filetransfer() -> Tuple[str, str]:
         try:
-            img_headers = {
-                "User-Agent": str(cfg.get("user_agent", "Mozilla/5.0")),
-                "Referer": "https://mp.weixin.qq.com/",
-            }
-            image_resp = requests.get(src, headers=img_headers, timeout=25)
-            if image_resp.status_code >= 400 or not image_resp.content:
-                return "", f"图片下载失败 HTTP {image_resp.status_code}"
+            download_candidates = [
+                {
+                    "User-Agent": str(cfg.get("user_agent", "Mozilla/5.0")),
+                    "Referer": "https://mp.weixin.qq.com/",
+                    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                },
+                {
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+                    "Referer": "https://dreamina.capcut.com/",
+                    "Origin": "https://dreamina.capcut.com",
+                    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                },
+                {
+                    "User-Agent": "curl/8.7.1",
+                    "Accept": "*/*",
+                },
+            ]
+            image_resp = None
+            download_errors: List[str] = []
+            for header_idx, img_headers in enumerate(download_candidates, start=1):
+                try:
+                    trial_resp = requests.get(src, headers=img_headers, timeout=25)
+                except Exception as e:
+                    download_errors.append(f"h{header_idx} 请求异常: {e}")
+                    continue
+                if trial_resp.status_code >= 400 or not trial_resp.content:
+                    download_errors.append(f"h{header_idx} HTTP {trial_resp.status_code}")
+                    continue
+                image_resp = trial_resp
+                break
+            if image_resp is None:
+                detail = "；".join(download_errors[:3]) if download_errors else "unknown"
+                return "", f"图片下载失败 {detail}"
 
             upload_api = "https://mp.weixin.qq.com/cgi-bin/filetransfer"
             headers = {
@@ -1370,6 +2128,7 @@ PUBLISH_STATUS_PENDING = "pending"
 PUBLISH_STATUS_PROCESSING = "processing"
 PUBLISH_STATUS_SUCCESS = "success"
 PUBLISH_STATUS_FAILED = "failed"
+_WECHAT_OPENAPI_TOKEN_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 def _wechat_auth(owner_id: str = "", session=None) -> Tuple[str, str]:
@@ -1437,13 +2196,425 @@ def _try_upload_cover_media_id(token: str, cookie: str, cover_url: str) -> Tuple
         return "", f"封面上传异常: {e}"
 
 
-def publish_batch_to_wechat_draft(items: List[Dict], owner_id: str = "", session=None) -> Tuple[bool, str, Dict]:
+def _get_wechat_openapi_access_token(app_id: str, app_secret: str) -> Tuple[str, str]:
+    appid = str(app_id or "").strip()
+    secret = str(app_secret or "").strip()
+    if not appid or not secret:
+        return "", "缺少 appid/appsecret"
+    cache_key = f"{appid}:{hashlib.sha1(secret.encode('utf-8')).hexdigest()[:12]}"
+    now_ts = int(time.time())
+    cached = _WECHAT_OPENAPI_TOKEN_CACHE.get(cache_key) or {}
+    cached_token = str(cached.get("token") or "").strip()
+    expire_at = int(cached.get("expire_at") or 0)
+    if cached_token and expire_at > now_ts + 30:
+        return cached_token, ""
+
+    token_url = "https://api.weixin.qq.com/cgi-bin/token"
+    params = {
+        "grant_type": "client_credential",
+        "appid": appid,
+        "secret": secret,
+    }
+    try:
+        resp = requests.get(token_url, params=params, timeout=(5, 25))
+    except Exception as e:
+        return "", f"获取 access_token 异常: {e}"
+    if int(resp.status_code or 0) >= 400:
+        return "", f"获取 access_token HTTP {resp.status_code}"
+    try:
+        payload = resp.json()
+    except Exception:
+        return "", "获取 access_token 返回非 JSON"
+    token = str(payload.get("access_token") or "").strip()
+    if not token:
+        err = str(payload.get("errmsg") or payload.get("errcode") or payload)[:260]
+        return "", f"获取 access_token 失败: {err}"
+    expires_in = int(payload.get("expires_in") or 7200)
+    _WECHAT_OPENAPI_TOKEN_CACHE[cache_key] = {
+        "token": token,
+        "expire_at": now_ts + max(60, expires_in - 120),
+    }
+    return token, ""
+
+
+def _download_image_bytes(image_url: str) -> Tuple[bytes, str, str]:
+    src = str(image_url or "").strip()
+    if not src:
+        return b"", "", "图片 URL 为空"
+    if not re.match(r"^https?://", src, flags=re.IGNORECASE):
+        return b"", "", "图片 URL 非 http(s)"
+    download_candidates = [
+        {
+            "User-Agent": str(cfg.get("user_agent", "Mozilla/5.0")),
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        },
+        {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            "Referer": "https://dreamina.capcut.com/",
+            "Origin": "https://dreamina.capcut.com",
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        },
+        {
+            "User-Agent": "curl/8.7.1",
+            "Accept": "*/*",
+        },
+    ]
+    errors: List[str] = []
+    for idx, headers in enumerate(download_candidates, start=1):
+        try:
+            resp = requests.get(src, headers=headers, timeout=(5, 30))
+        except Exception as e:
+            errors.append(f"h{idx} 请求异常: {e}")
+            continue
+        if int(resp.status_code or 0) >= 400 or not resp.content:
+            errors.append(f"h{idx} HTTP {resp.status_code}")
+            continue
+        mime = str(resp.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip() or "image/jpeg"
+        return bytes(resp.content), mime, ""
+    return b"", "", "；".join(errors[:3]) if errors else "下载失败"
+
+
+def _compress_image_bytes(raw: bytes, max_size: int) -> bytes:
+    data = bytes(raw or b"")
+    if not data or len(data) <= max_size:
+        return data
+    try:
+        from PIL import Image
+    except Exception:
+        return data
+    try:
+        image = Image.open(io.BytesIO(data))
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+        quality = 88
+        width, height = image.size
+        scale = 1.0
+        while True:
+            buf = io.BytesIO()
+            resized = image
+            if scale < 0.999:
+                resized = image.resize((max(32, int(width * scale)), max(32, int(height * scale))), Image.LANCZOS)
+            resized.save(buf, format="JPEG", quality=max(30, quality))
+            out = buf.getvalue()
+            if len(out) <= max_size:
+                return out
+            if quality > 38:
+                quality -= 8
+            else:
+                scale *= 0.86
+                if scale < 0.35:
+                    return out
+    except Exception:
+        return data
+
+
+def _upload_article_image_openapi(access_token: str, image_url: str) -> Tuple[str, str]:
+    src = str(image_url or "").strip()
+    if not src:
+        return "", "正文图片 URL 为空"
+    if _is_wechat_cdn_url(src):
+        return src, ""
+    image_bytes, mime, dl_err = _download_image_bytes(src)
+    if not image_bytes:
+        return "", f"图片下载失败 {dl_err}"
+    image_bytes = _compress_image_bytes(image_bytes, max_size=1 * 1024 * 1024)
+    endpoint = f"https://api.weixin.qq.com/cgi-bin/media/uploadimg?access_token={access_token}"
+    files = {
+        "media": (f"body_{int(time.time() * 1000)}.jpg", image_bytes, mime or "image/jpeg"),
+    }
+    try:
+        resp = requests.post(endpoint, files=files, timeout=(5, 40))
+    except Exception as e:
+        return "", f"正文图片上传异常: {e}"
+    if int(resp.status_code or 0) >= 400:
+        return "", f"正文图片上传 HTTP {resp.status_code}"
+    try:
+        payload = resp.json()
+    except Exception:
+        return "", "正文图片上传返回非 JSON"
+    url = str(payload.get("url") or "").strip()
+    if url:
+        return url, ""
+    err = str(payload.get("errmsg") or payload.get("errcode") or payload)[:240]
+    return "", f"正文图片上传失败: {err}"
+
+
+def _upload_cover_media_openapi(access_token: str, cover_url: str) -> Tuple[str, str]:
+    def _post_cover(image_bytes: bytes, mime: str, filename: str) -> Tuple[str, str]:
+        endpoint = f"https://api.weixin.qq.com/cgi-bin/material/add_material?access_token={access_token}&type=image"
+        files = {
+            "media": (filename, image_bytes, mime or "image/jpeg"),
+        }
+        try:
+            resp = requests.post(endpoint, files=files, timeout=(5, 40))
+        except Exception as e:
+            return "", f"封面上传异常: {e}"
+        if int(resp.status_code or 0) >= 400:
+            return "", f"封面上传 HTTP {resp.status_code}"
+        try:
+            payload = resp.json()
+        except Exception:
+            return "", "封面上传返回非 JSON"
+        media_id = str(payload.get("media_id") or "").strip()
+        if media_id:
+            return media_id, ""
+        err = str(payload.get("errmsg") or payload.get("errcode") or payload)[:240]
+        return "", f"封面上传失败: {err}"
+
+    src = str(cover_url or "").strip()
+    if not src:
+        return "", "封面 URL 为空"
+    image_bytes, mime, dl_err = _download_image_bytes(src)
+    if not image_bytes:
+        return "", f"封面下载失败 {dl_err}"
+    image_bytes = _compress_image_bytes(image_bytes, max_size=9 * 1024 * 1024)
+    return _post_cover(
+        image_bytes=image_bytes,
+        mime=mime or "image/jpeg",
+        filename=f"cover_{int(time.time() * 1000)}.jpg",
+    )
+
+
+def _upload_cover_media_openapi_from_local_file(access_token: str, file_path: str) -> Tuple[str, str]:
+    path = str(file_path or "").strip()
+    if not path:
+        return "", "默认封面路径为空"
+    if not os.path.isfile(path):
+        return "", f"默认封面文件不存在: {path}"
+    try:
+        with open(path, "rb") as f:
+            image_bytes = f.read()
+    except Exception as e:
+        return "", f"读取默认封面失败: {e}"
+    if not image_bytes:
+        return "", "默认封面内容为空"
+    mime = "image/png"
+    lower = path.lower()
+    if lower.endswith(".jpg") or lower.endswith(".jpeg"):
+        mime = "image/jpeg"
+    elif lower.endswith(".gif"):
+        mime = "image/gif"
+    elif lower.endswith(".webp"):
+        mime = "image/webp"
+    image_bytes = _compress_image_bytes(image_bytes, max_size=9 * 1024 * 1024)
+    endpoint = f"https://api.weixin.qq.com/cgi-bin/material/add_material?access_token={access_token}&type=image"
+    files = {
+        "media": (f"cover_fallback_{int(time.time() * 1000)}.jpg", image_bytes, mime),
+    }
+    try:
+        resp = requests.post(endpoint, files=files, timeout=(5, 40))
+    except Exception as e:
+        return "", f"默认封面上传异常: {e}"
+    if int(resp.status_code or 0) >= 400:
+        return "", f"默认封面上传 HTTP {resp.status_code}"
+    try:
+        payload = resp.json()
+    except Exception:
+        return "", "默认封面上传返回非 JSON"
+    media_id = str(payload.get("media_id") or "").strip()
+    if media_id:
+        return media_id, ""
+    err = str(payload.get("errmsg") or payload.get("errcode") or payload)[:240]
+    return "", f"默认封面上传失败: {err}"
+
+
+def _rewrite_html_images_to_wechat_openapi(content_html: str, access_token: str) -> Tuple[str, Dict[str, str], List[str]]:
+    text = str(content_html or "")
+    if not text:
+        return "", {}, []
+    mapping: Dict[str, str] = {}
+    warnings: List[str] = []
+
+    def _repl(match: re.Match) -> str:
+        tag = str(match.group(0) or "")
+        src = (
+            _extract_img_attr(tag, "src")
+            or _extract_img_attr(tag, "data-src")
+            or _extract_img_attr(tag, "data-original")
+            or _extract_img_attr(tag, "data-url")
+        )
+        src = str(src or "").strip()
+        if not src or not re.match(r"^https?://", src, flags=re.IGNORECASE):
+            return tag
+        if _is_wechat_cdn_url(src):
+            return tag
+        if src in mapping:
+            target = mapping[src]
+        else:
+            target, err = _upload_article_image_openapi(access_token, src)
+            if not target:
+                warnings.append(f"{src[:80]} -> {err}")
+                return tag
+            mapping[src] = target
+        updated = _set_img_attr(tag, "src", target)
+        updated = _set_img_attr(updated, "data-src", target)
+        updated = _set_img_attr(updated, "data-original", target)
+        return updated
+
+    rewritten = re.sub(r"<img\b[^>]*>", _repl, text, flags=re.IGNORECASE)
+    return rewritten, mapping, warnings
+
+
+def _publish_batch_to_wechat_draft_openapi(
+    items: List[Dict],
+    wechat_app_id: str,
+    wechat_app_secret: str,
+) -> Tuple[bool, str, Dict]:
+    token, token_err = _get_wechat_openapi_access_token(wechat_app_id, wechat_app_secret)
+    if not token:
+        return False, f"微信公众号接口不可用：{token_err}", {}
+
+    articles: List[Dict[str, Any]] = []
+    body_image_warnings: List[str] = []
+    missing_image_titles: List[str] = []
+    cover_warnings: List[str] = []
+    for item in items or []:
+        title = str(item.get("title") or "未命名草稿").strip()
+        safe_title = _safe_wechat_title(title)
+        markdown = str(item.get("content") or "").strip()
+        if not markdown:
+            continue
+        cover_url = str(item.get("cover_url") or "").strip()
+        content_html = _normalize_wechat_img_tags(_markdown_to_wechat_html(markdown))
+        content_html, _, upload_warnings = _rewrite_html_images_to_wechat_openapi(content_html, token)
+        if upload_warnings:
+            body_image_warnings.extend([f"{title}: {x}" for x in upload_warnings[:3]])
+
+        body_image_urls = _extract_image_urls_from_html(content_html)
+        first_body_image = _pick_first_http_image_url(body_image_urls)
+        content_html, injected = _ensure_wechat_body_has_image(content_html, first_body_image or cover_url)
+        if injected:
+            content_html, _, inject_warnings = _rewrite_html_images_to_wechat_openapi(content_html, token)
+            if inject_warnings:
+                body_image_warnings.extend([f"{title}: {x}" for x in inject_warnings[:3]])
+            body_image_urls = _extract_image_urls_from_html(content_html)
+
+        if not _contains_html_image(content_html):
+            missing_image_titles.append(title)
+            continue
+
+        cover_candidates: List[str] = []
+        for url in body_image_urls:
+            text = str(url or "").strip()
+            if not re.match(r"^https?://", text, flags=re.IGNORECASE):
+                continue
+            if text not in cover_candidates:
+                cover_candidates.append(text)
+        if re.match(r"^https?://", cover_url, flags=re.IGNORECASE) and cover_url not in cover_candidates:
+            cover_candidates.append(cover_url)
+
+        thumb_media_id = ""
+        cover_attempt_errors: List[str] = []
+        for candidate in cover_candidates[:6]:
+            thumb_media_id, cover_err = _upload_cover_media_openapi(token, candidate)
+            if thumb_media_id:
+                break
+            if cover_err:
+                cover_attempt_errors.append(f"{candidate[:80]} -> {cover_err}")
+
+        if not thumb_media_id:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            fallback_path = str(
+                cfg.get("ai.wechat_default_cover_path", os.path.join(base_dir, "static", "default-avatar.png"))
+                or ""
+            ).strip()
+            if fallback_path and not os.path.isabs(fallback_path):
+                fallback_path = os.path.abspath(os.path.join(base_dir, fallback_path))
+            thumb_media_id, fallback_err = _upload_cover_media_openapi_from_local_file(token, fallback_path)
+            if thumb_media_id:
+                cover_warnings.append(f"{title}: 封面链接不可用，已自动回退默认封面")
+            else:
+                if not cover_attempt_errors:
+                    if cover_candidates:
+                        cover_attempt_errors.append("封面处理失败（无可用封面候选）")
+                    else:
+                        cover_attempt_errors.append("缺少可用封面图链接")
+                if fallback_err:
+                    cover_attempt_errors.append(f"默认封面回退失败: {fallback_err}")
+                cover_warnings.append(f"{title}: {'；'.join(cover_attempt_errors[:3])}")
+                continue
+
+        articles.append(
+            {
+                "title": safe_title,
+                "author": str(item.get("author") or "").strip(),
+                "digest": str(item.get("digest") or "").strip()[:120],
+                "content": content_html,
+                "content_source_url": "",
+                "thumb_media_id": thumb_media_id,
+                "need_open_comment": 1,
+                "only_fans_can_comment": 0,
+            }
+        )
+
+    if missing_image_titles:
+        return False, "微信草稿箱投递失败: 以下草稿正文缺少插图: " + "；".join(missing_image_titles[:5]), {
+            "missing_body_image_titles": missing_image_titles,
+            "body_image_upload_warnings": body_image_warnings[:20],
+            "cover_warnings": cover_warnings[:20],
+        }
+    if cover_warnings and not articles:
+        sample = str(cover_warnings[0] or "").strip()
+        sample_text = f"（示例：{sample[:160]}）" if sample else ""
+        return False, f"微信草稿箱投递失败: 封面处理失败，请检查封面图链接与公众号权限{sample_text}", {
+            "cover_warnings": cover_warnings[:20],
+            "body_image_upload_warnings": body_image_warnings[:20],
+        }
+    if not articles:
+        return False, "没有有效内容可推送", {}
+
+    endpoint = f"https://api.weixin.qq.com/cgi-bin/draft/add?access_token={token}"
+    try:
+        # 显式序列化 JSON，确保中文不被转义为 \uXXXX（修复草稿箱乱码问题）
+        payload_json = json.dumps({"articles": articles}, ensure_ascii=False)
+        resp = requests.post(
+            endpoint,
+            data=payload_json.encode('utf-8'),
+            headers={"Content-Type": "application/json; charset=utf-8"},
+            timeout=(5, 40),
+        )
+    except Exception as e:
+        return False, f"微信草稿箱请求异常: {e}", {}
+    if int(resp.status_code or 0) >= 400:
+        return False, f"微信草稿箱接口返回 HTTP {resp.status_code}", {"status_code": resp.status_code}
+    try:
+        payload = resp.json()
+    except Exception:
+        return False, "微信草稿箱接口返回非 JSON", {"raw": str(resp.text or "")[:260]}
+    media_id = str(payload.get("media_id") or "").strip()
+    if media_id:
+        msg = "已按官方接口投递到公众号草稿箱"
+        if body_image_warnings:
+            msg += f"（正文图片降级 {len(body_image_warnings)} 项）"
+        if cover_warnings:
+            msg += f"（封面降级 {len(cover_warnings)} 项）"
+        payload["body_image_upload_warnings"] = body_image_warnings[:20]
+        payload["cover_warnings"] = cover_warnings[:20]
+        return True, msg, payload
+    errcode = payload.get("errcode")
+    errmsg = payload.get("errmsg")
+    return False, f"微信草稿箱投递失败: errcode={errcode}, errmsg={errmsg}", payload
+
+
+def publish_batch_to_wechat_draft(
+    items: List[Dict],
+    owner_id: str = "",
+    session=None,
+    wechat_app_id: str = "",
+    wechat_app_secret: str = "",
+) -> Tuple[bool, str, Dict]:
     """
     批量推送到公众号草稿箱（单次请求支持多图文）。
     当封面 media_id 上传失败时，会降级为无封面继续投递。
     """
     if not items:
         return False, "没有可投递内容", {}
+    app_id = str(wechat_app_id or "").strip()
+    app_secret = str(wechat_app_secret or "").strip()
+    if app_id and app_secret:
+        return _publish_batch_to_wechat_draft_openapi(items=items, wechat_app_id=app_id, wechat_app_secret=app_secret)
+    if app_id or app_secret:
+        return False, "同步到草稿箱需要同时提供 wechat_app_id 与 wechat_app_secret", {}
     try:
         token, cookie = _wechat_auth(owner_id=owner_id, session=session)
     except Exception:
@@ -1459,6 +2630,7 @@ def publish_batch_to_wechat_draft(items: List[Dict], owner_id: str = "", session
     cover_from_first_body_image_titles: List[str] = []
     for item in items:
         title = str(item.get("title", "未命名草稿")).strip()
+        safe_title = _safe_wechat_title(title)
         content = str(item.get("content", "")).strip()
         if not content:
             continue
@@ -1498,7 +2670,7 @@ def publish_batch_to_wechat_draft(items: List[Dict], owner_id: str = "", session
             cover_warnings.append(f"{title}: {cover_err}")
         appmsg.append(
             {
-                "title": title,
+                "title": safe_title,
                 "author": str(item.get("author", "")).strip(),
                 "digest": str(item.get("digest", "")).strip()[:120],
                 "content": content_html,

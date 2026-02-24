@@ -8,6 +8,7 @@ from core.wechat_auth_service import (
     get_token_cookie,
     migrate_global_auth_to_owner,
     get_wechat_auth,
+    validate_and_maybe_clear_wechat_auth,
 )
 from core.models.wechat_auth import WechatAuth
 
@@ -61,6 +62,31 @@ class WechatAuthServiceTestCase(unittest.TestCase):
         self.assertTrue(result.get("migrated"))
         item = get_wechat_auth(self.session, self.owner_id)
         self.assertEqual(item.token, "global-token")
+
+    def test_validate_should_clear_invalid_session(self):
+        upsert_wechat_auth(
+            session=self.session,
+            owner_id=self.owner_id,
+            token="token-demo",
+            cookie="cookie-demo",
+            wx_app_name="demo-app",
+        )
+        invalid_payload = {
+            "base_resp": {
+                "ret": 200003,
+                "err_msg": "invalid session",
+            }
+        }
+        with patch("core.wechat_auth_service.requests.get") as req_mock:
+            req_mock.return_value.status_code = 200
+            req_mock.return_value.json.return_value = invalid_payload
+            req_mock.return_value.text = '{"base_resp":{"ret":200003,"err_msg":"invalid session"}}'
+            result = validate_and_maybe_clear_wechat_auth(self.session, self.owner_id)
+
+        self.assertEqual(result.get("status"), "invalid_cleared")
+        token, cookie = get_token_cookie(self.session, self.owner_id, allow_global_fallback=False)
+        self.assertEqual(token, "")
+        self.assertEqual(cookie, "")
 
 
 if __name__ == "__main__":

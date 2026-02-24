@@ -210,8 +210,9 @@ export interface WechatAuthStatus {
   updated_at?: string | null
 }
 
-export const getWechatAuthStatus = () => {
-  return http.get<WechatAuthStatus>('/wx/auth/wechat/auth')
+export const getWechatAuthStatus = (strict: boolean = false) => {
+  const flag = strict ? '1' : '0'
+  return http.get<WechatAuthStatus>(`/wx/auth/wechat/auth?strict=${flag}`)
 }
 
 export const mockBindWechatAuth = (data: {

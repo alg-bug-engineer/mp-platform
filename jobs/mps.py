@@ -10,7 +10,25 @@ from core.config import cfg,DEBUG
 from core.print import print_info,print_success,print_error
 from driver.wx import WX_API
 from driver.success import Success
+from core.wechat_auth_service import get_token_cookie
 wx_db=db.Db(tag="任务调度")
+
+
+def _resolve_auth(owner_id: str):
+    session = db.DB.get_session()
+    try:
+        token, cookie = get_token_cookie(
+            session=session,
+            owner_id=str(owner_id or "").strip(),
+            allow_global_fallback=False,
+        )
+        return str(token or "").strip(), str(cookie or "").strip(), str(cfg.get("user_agent", "") or "").strip()
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
 def fetch_all_article():
     print("开始更新")
     wx=WxGather().Model()
@@ -19,7 +37,19 @@ def fetch_all_article():
         mps=db.DB.get_all_mps()
         for item in mps:
             try:
-                wx.get_Articles(item.faker_id,CallBack=UpdateArticle,Mps_id=item.id,Mps_title=item.mp_name, MaxPage=1)
+                token, cookie, user_agent = _resolve_auth(getattr(item, "owner_id", ""))
+                if not token or not cookie:
+                    continue
+                wx.get_Articles(
+                    item.faker_id,
+                    CallBack=UpdateArticle,
+                    Mps_id=item.id,
+                    Mps_title=item.mp_name,
+                    MaxPage=1,
+                    token=token,
+                    cookie=cookie,
+                    user_agent=user_agent,
+                )
             except Exception as e:
                 print(e)
         print(wx.articles) 
@@ -43,7 +73,22 @@ def do_job(mp=None,task:MessageTask=None):
         all_count=0
         wx=WxGather().Model()
         try:
-            wx.get_Articles(mp.faker_id,CallBack=UpdateArticle,Mps_id=mp.id,Mps_title=mp.mp_name, MaxPage=1,Over_CallBack=Update_Over,interval=interval)
+            token, cookie, user_agent = _resolve_auth(getattr(mp, "owner_id", ""))
+            if not token or not cookie:
+                print_error(f"任务({getattr(task, 'id', '')})[{getattr(mp, 'mp_name', '')}] 授权无效，跳过抓取")
+                return
+            wx.get_Articles(
+                mp.faker_id,
+                CallBack=UpdateArticle,
+                Mps_id=mp.id,
+                Mps_title=mp.mp_name,
+                MaxPage=1,
+                Over_CallBack=Update_Over,
+                interval=interval,
+                token=token,
+                cookie=cookie,
+                user_agent=user_agent,
+            )
         except Exception as e:
             print_error(e)
             # raise

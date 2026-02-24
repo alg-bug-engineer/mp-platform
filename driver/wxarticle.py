@@ -220,11 +220,7 @@ class WXArticleFetcher:
             self.Close() 
     async def async_get_article_content(self,url:str)->Dict:
         import asyncio
-        from concurrent.futures import ThreadPoolExecutor
-        loop = asyncio.get_running_loop()
-        with ThreadPoolExecutor() as pool:
-            future = loop.run_in_executor(pool, self.get_article_content, url)
-        return await future
+        return await asyncio.to_thread(self.get_article_content, url)
     def get_article_content(self, url: str) -> Dict:
         """获取单篇文章详细内容
         

@@ -86,7 +86,7 @@
     <a-card v-if="activeView === 'integration'" id="billing-integration-anchor" class="panel" title="支付系统接入预留">
       <a-space direction="vertical" fill>
         <a-alert type="info">
-          当前为 mock 支付模式，便于联调套餐与额度逻辑。接入真实支付时仅需替换支付确认链路。
+          当前为支付接入预发布阶段，后续接入真实支付时仅需替换支付确认链路。
         </a-alert>
         <div class="integration-row"><span>1. 支付渠道</span><span>预留微信支付 / 支付宝 / Stripe</span></div>
         <div class="integration-row"><span>2. 回调验签</span><span>按订单号验签并写入 `provider_txn_id`</span></div>
@@ -267,7 +267,7 @@ const submitOrder = async () => {
     const order = await createBillingOrder({
       plan_tier: form.plan_tier,
       months: form.months,
-      channel: 'mock',
+      channel: 'sandbox',
       note: form.note,
     })
     latestPayHint.value = order?.payment?.message || ''
@@ -282,7 +282,7 @@ const submitOrder = async () => {
 }
 
 const payOrder = async (orderNo: string) => {
-  await payBillingOrder(orderNo, { provider_txn_id: `mock-${Date.now()}` })
+  await payBillingOrder(orderNo, { provider_txn_id: `sandbox-${Date.now()}` })
   Message.success('支付成功，套餐已生效')
   focusOrder(orderNo)
   await refreshAll()

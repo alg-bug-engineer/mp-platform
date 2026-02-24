@@ -79,7 +79,7 @@ After generation:
 
 ## Usage Docs
 
-- Startup and usage guide: `docs/启动与使用指南.md`
+- Startup and usage guide: `docs/guides/启动与使用指南.md`
 - History cleanup script: `script/clean_history.sh`
 
 ## Delivery Scope

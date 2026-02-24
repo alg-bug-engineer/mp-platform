@@ -15,8 +15,8 @@
             <div class="metric-label">数据隔离</div>
           </div>
           <div class="metric">
-            <div class="metric-value">可商业化</div>
-            <div class="metric-label">套餐与配额</div>
+            <div class="metric-value">可扩展</div>
+            <div class="metric-label">运营能力</div>
           </div>
         </div>
       </section>
@@ -59,6 +59,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
 import { login, register } from '@/api/auth'
+import { trackEvent } from '@/utils/analytics'
 
 const title = computed(() => import.meta.env.VITE_APP_TITLE || '商业化内容创作平台')
 const router = useRouter()
@@ -83,6 +84,12 @@ const doLogin = async (username: string, password: string) => {
   const res = await login({ username, password })
   localStorage.setItem('token', res.access_token)
   localStorage.setItem('token_expire', String(Date.now() + (res.expires_in * 1000)))
+  trackEvent({
+    event_type: 'login_success',
+    feature: 'auth',
+    action: 'login',
+    value: username,
+  })
   await router.push('/')
 }
 
@@ -95,6 +102,15 @@ const handleLogin = async () => {
   try {
     await doLogin((loginForm.value.account || '').trim(), loginForm.value.password)
     Message.success('登录成功')
+  } catch (e: any) {
+    trackEvent({
+      event_type: 'login_failed',
+      feature: 'auth',
+      action: 'login',
+      value: (loginForm.value.account || '').trim(),
+      metadata: { message: String(e || '') },
+    })
+    Message.error(String(e || '登录失败，请稍后重试'))
   } finally {
     loading.value = false
   }
@@ -116,8 +132,23 @@ const handleRegister = async () => {
       password: registerForm.value.password,
       nickname: registerForm.value.nickname,
     })
+    trackEvent({
+      event_type: 'register_success',
+      feature: 'auth',
+      action: 'register',
+      value: registerForm.value.phone,
+    })
     await doLogin(registerForm.value.phone, registerForm.value.password)
     Message.success('注册并登录成功')
+  } catch (e: any) {
+    trackEvent({
+      event_type: 'register_failed',
+      feature: 'auth',
+      action: 'register',
+      value: registerForm.value.phone,
+      metadata: { message: String(e || '') },
+    })
+    Message.error(String(e || '注册失败，请稍后重试'))
   } finally {
     loading.value = false
   }

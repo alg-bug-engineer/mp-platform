@@ -9,8 +9,11 @@ from .message_task import MessageTask
 # 导入配置管理模型
 from .config_management import ConfigManagement
 from .ai_profile import AIProfile
+from .ai_daily_usage import AIDailyUsage
 from .ai_publish_task import AIPublishTask
+from .ai_compose_result import AIComposeResult
 from .wechat_auth import WechatAuth
 from .billing_order import BillingOrder
+from .analytics_event import AnalyticsEvent
 # 导入基础模型
 from .base import *

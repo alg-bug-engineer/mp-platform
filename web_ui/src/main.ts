@@ -5,9 +5,12 @@ import ArcoVue from '@arco-design/web-vue'
 import ArcoVueIcon from '@arco-design/web-vue/es/icon'
 import '@arco-design/web-vue/dist/arco.css'
 import './style.css'
+import { bootstrapAnalytics } from '@/utils/analytics'
 
 const app = createApp(App)
 app.use(ArcoVue)
 app.use(ArcoVueIcon)
 app.use(router)
 app.mount('#app')
+
+void bootstrapAnalytics(router)

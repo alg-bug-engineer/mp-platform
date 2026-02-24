@@ -122,6 +122,7 @@ import {
 import { getCurrentUser, getWechatAuthStatus, logout, type CurrentUser } from '@/api/auth'
 import WechatAuthQrcode from '@/components/WechatAuthQrcode.vue'
 import brandLogo from '@/assets/logo.svg'
+import { loadRuntimeSettings } from '@/utils/runtime'
 
 type NavNode = {
   key: string
@@ -133,6 +134,7 @@ type NavNode = {
   query?: Record<string, string>
   prefix?: boolean
   adminOnly?: boolean
+  hideInAllFree?: boolean
 }
 
 type NavGroup = {
@@ -154,11 +156,10 @@ const nodes: NavNode[] = [
   { key: 'content', label: '内容池', hint: '文章管理', path: '/workspace/content', group: 'content', icon: IconBook, prefix: true },
   { key: 'subs', label: '订阅源', hint: '公众号订阅', path: '/workspace/subscriptions', group: 'content', icon: IconApps, prefix: true },
   { key: 'studio', label: '创作中台', hint: '分析/创作/仿写', path: '/workspace/studio', group: 'content', icon: IconEdit, prefix: true },
-  { key: 'draftbox', label: '草稿箱', hint: '本地草稿', path: '/workspace/draftbox', group: 'content', icon: IconFile, prefix: true },
 
-  { key: 'bill-plan', label: '套餐选择', hint: '选择套餐并下单', path: '/workspace/billing', group: 'billing', icon: IconGift, query: { anchor: 'plans' }, prefix: true },
-  { key: 'bill-orders', label: '我的订单', hint: '支付/取消/追踪', path: '/workspace/billing', group: 'billing', icon: IconGift, query: { anchor: 'orders' }, prefix: true },
-  { key: 'bill-integration', label: '支付接入', hint: '支付系统接入', path: '/workspace/billing', group: 'billing', icon: IconGift, query: { anchor: 'integration' }, prefix: true },
+  { key: 'bill-plan', label: '套餐选择', hint: '选择套餐并下单', path: '/workspace/billing', group: 'billing', icon: IconGift, query: { anchor: 'plans' }, prefix: true, hideInAllFree: true },
+  { key: 'bill-orders', label: '我的订单', hint: '支付/取消/追踪', path: '/workspace/billing', group: 'billing', icon: IconGift, query: { anchor: 'orders' }, prefix: true, hideInAllFree: true },
+  { key: 'bill-integration', label: '支付接入', hint: '支付系统接入', path: '/workspace/billing', group: 'billing', icon: IconGift, query: { anchor: 'integration' }, prefix: true, hideInAllFree: true },
 
   { key: 'ops-msg', label: '消息任务', hint: '任务队列', path: '/workspace/ops/messages', group: 'ops', icon: IconMessage, prefix: true },
   { key: 'ops-tags', label: '标签管理', hint: '内容分类', path: '/workspace/ops/tags', group: 'ops', icon: IconTag, prefix: true },
@@ -167,7 +168,8 @@ const nodes: NavNode[] = [
   { key: 'account-profile', label: '个人中心', hint: '账号信息', path: '/edit-user', group: 'account', icon: IconUser },
   { key: 'account-password', label: '修改密码', hint: '安全设置', path: '/change-password', group: 'account', icon: IconLock },
 
-  { key: 'admin-plans', label: '套餐管理', hint: '管理员配置', path: '/workspace/admin/plans', group: 'admin', icon: IconCommand, adminOnly: true, prefix: true },
+  { key: 'admin-plans', label: '用户管理', hint: '用户/配额/授权', path: '/workspace/admin/plans', group: 'admin', icon: IconCommand, adminOnly: true, prefix: true },
+  { key: 'admin-analytics', label: '数据统计', hint: '运营分析面板', path: '/workspace/admin/analytics', group: 'admin', icon: IconFile, adminOnly: true, prefix: true },
 ]
 
 const route = useRoute()
@@ -182,6 +184,12 @@ const userInfo = ref<CurrentUser>({
 })
 const wxAuthReady = ref(false)
 const navCollapsed = ref(localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === '1')
+const runtimeSettings = ref({
+  product_mode: 'all_free',
+  is_all_free: true,
+  billing_visible: false,
+  analytics_enabled: true,
+})
 
 const userPlanLabel = computed(() => {
   if (navCollapsed.value) return userInfo.value?.plan?.tier?.toUpperCase?.() || 'FREE'
@@ -192,6 +200,7 @@ const wxAuthLabel = computed(() => {
   return wxAuthReady.value ? '公众号已授权' : '公众号未授权'
 })
 const isAdmin = computed(() => userInfo.value?.role === 'admin')
+const isAllFreeMode = computed(() => !!runtimeSettings.value?.is_all_free)
 const planColor = computed(() => {
   const tier = userInfo.value?.plan?.tier || 'free'
   if (tier === 'premium') return 'purple'
@@ -219,7 +228,11 @@ const isNodeActive = (node: NavNode) => {
 }
 
 const visibleNavGroups = computed(() => {
-  const visibleNodes = nodes.filter((node) => !node.adminOnly || isAdmin.value)
+  const visibleNodes = nodes.filter((node) => {
+    if (node.adminOnly && !isAdmin.value) return false
+    if (isAllFreeMode.value && node.hideInAllFree) return false
+    return true
+  })
   return groups
     .map((group) => {
       const items = visibleNodes
@@ -274,8 +287,14 @@ const navigateToWithQuery = async (path: string, query?: Record<string, string>)
 
 const consumeRouteNotice = () => {
   const notice = getQueryText('notice')
-  if (notice !== 'forbidden') return
-  Message.warning('当前账号权限不足，已返回可访问页面')
+  if (!notice) return
+  if (notice === 'forbidden') {
+    Message.warning('当前账号权限不足，已返回可访问页面')
+  } else if (notice === 'billing_hidden') {
+    Message.info('当前处于全站免费模式，套餐与支付面板已隐藏')
+  } else {
+    return
+  }
   const nextQuery: Record<string, any> = { ...route.query }
   delete nextQuery.notice
   delete nextQuery.target
@@ -283,12 +302,27 @@ const consumeRouteNotice = () => {
 }
 
 const fetchUser = async () => {
-  if (!localStorage.getItem('token')) return
+  if (!localStorage.getItem('token')) {
+    wxAuthReady.value = false
+    userInfo.value = { username: '', nickname: '' }
+    return
+  }
   try {
+    const previousUsername = String(userInfo.value?.username || '').trim()
     const data = await getCurrentUser()
-    userInfo.value = data || {}
-    const auth = await getWechatAuthStatus()
+    userInfo.value = data || { username: '', nickname: '' }
+    const currentUsername = String(userInfo.value?.username || '').trim()
+    const strict = !!currentUsername && currentUsername !== previousUsername
+    const auth = await getWechatAuthStatus(strict)
     wxAuthReady.value = !!auth?.authorized
+  } catch {
+    wxAuthReady.value = false
+  }
+}
+
+const fetchRuntime = async () => {
+  try {
+    runtimeSettings.value = await loadRuntimeSettings()
   } catch {
     // ignored
   }
@@ -304,6 +338,8 @@ const doLogout = async () => {
     await logout()
   } finally {
     localStorage.removeItem('token')
+    wxAuthReady.value = false
+    userInfo.value = { username: '', nickname: '' }
     await router.push('/login')
     Message.success('已退出登录')
   }
@@ -317,11 +353,13 @@ watch(
   () => route.fullPath,
   () => {
     consumeRouteNotice()
+    fetchRuntime()
     fetchUser()
   }
 )
 
 onMounted(() => {
+  fetchRuntime()
   fetchUser()
   consumeRouteNotice()
 })

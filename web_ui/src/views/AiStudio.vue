@@ -10,7 +10,7 @@
         <a-button :type="isWechatAuthorized ? 'secondary' : 'primary'" :disabled="isWechatAuthorized" @click="openAuth">
           {{ isWechatAuthorized ? '已授权' : '扫码授权公众号' }}
         </a-button>
-        <a-button type="outline" @click="goBilling">套餐订阅</a-button>
+        <a-button v-if="!isAllFreeMode" type="outline" @click="goBilling">套餐订阅</a-button>
       </a-space>
     </section>
 
@@ -28,92 +28,27 @@
       </a-space>
     </section>
 
-    <div class="studio-layout" :class="{ 'draftbox-mode': isDraftboxRoute }">
-      <aside v-if="!isDraftboxRoute" class="studio-tools">
-
-        <div id="ai-profile-anchor"></div>
-        <a-card title="AI 创作配置" class="panel">
-          <a-form :model="profile" layout="vertical">
-            <a-row :gutter="16">
-              <a-col :xs="24" :md="12">
-                <a-form-item label="Base URL">
-                  <a-input v-model="profile.base_url" placeholder="https://api.moonshot.cn/v1" />
-                </a-form-item>
-              </a-col>
-              <a-col :xs="24" :md="12">
-                <a-form-item label="模型名称">
-                  <a-input v-model="profile.model_name" placeholder="kimi-k2-0711-preview" />
-                </a-form-item>
-              </a-col>
-            </a-row>
-            <a-row :gutter="16">
-              <a-col :xs="24" :md="12">
-                <a-form-item label="API Key">
-                  <a-input-password v-model="profile.api_key" placeholder="sk-..." />
-                </a-form-item>
-              </a-col>
-              <a-col :xs="24" :md="12">
-                <a-form-item label="温度(0-100)">
-                  <a-slider v-model="profile.temperature" :min="0" :max="100" :step="1" />
-                </a-form-item>
-              </a-col>
-            </a-row>
-            <a-space>
-              <a-button type="primary" :loading="saving" @click="saveProfile">保存配置</a-button>
-              <a-button @click="loadProfile">刷新配置</a-button>
-            </a-space>
-          </a-form>
-        </a-card>
-
-        <a-card class="panel" title="套餐与授权">
-          <a-space direction="vertical" fill>
-            <div class="plan-head">
-              <a-tag :color="planTagColor">{{ overview.plan?.label || '免费用户' }}</a-tag>
-              <span class="muted">{{ overview.plan?.price_hint || '' }}</span>
-            </div>
-            <div class="quota-line">
-              <span>AI 配额</span>
-              <span>{{ overview.plan?.ai_used || 0 }}/{{ overview.plan?.ai_quota || 0 }}</span>
-            </div>
-            <div class="quota-line">
-              <span>图片配额</span>
-              <span>{{ overview.plan?.image_used || 0 }}/{{ overview.plan?.image_quota || 0 }}</span>
-            </div>
-            <a-alert :type="overview.wechat_auth?.authorized ? 'success' : 'warning'">
-              {{ overview.wechat_auth?.authorized ? '公众号已授权，可直接投递草稿' : '公众号未授权，暂只能保存在本地草稿箱' }}
-            </a-alert>
-            <a-space wrap>
-              <a-button
-                size="small"
-                :type="isWechatAuthorized ? 'secondary' : 'outline'"
-                :disabled="isWechatAuthorized"
-                @click="openAuth"
-              >
-                {{ isWechatAuthorized ? '已授权' : '去授权' }}
-              </a-button>
-              <a-button size="small" type="primary" @click="goBilling">去套餐订阅页</a-button>
-            </a-space>
-          </a-space>
-        </a-card>
-      </aside>
-
-      <section class="studio-display" :class="{ full: isDraftboxRoute }">
+    <div class="studio-layout">
+      <section class="studio-display">
         <a-row :gutter="16" class="summary-row">
           <a-col :xs="24" :md="8">
             <a-card class="summary-card" :loading="overviewLoading">
               <template #title>创作额度</template>
               <a-space direction="vertical" fill>
                 <div class="quota-line">
-                  <span>AI 配额</span>
-                  <span>{{ overview.plan?.ai_used || 0 }}/{{ overview.plan?.ai_quota || 0 }}</span>
+                  <span>AI 日额度</span>
+                  <span>{{ overview.stats?.daily_ai_used || 0 }}/{{ overview.stats?.daily_ai_limit || 60 }}</span>
                 </div>
-                <a-progress :percent="quotaPercent(overview.plan?.ai_used, overview.plan?.ai_quota)" />
+                <a-progress :percent="quotaPercent(overview.stats?.daily_ai_used, overview.stats?.daily_ai_limit)" />
+                <div class="muted">
+                  今日剩余 {{ overview.stats?.daily_ai_remaining ?? 0 }} 次
+                </div>
                 <div class="quota-line">
                   <span>图片配额</span>
                   <span>{{ overview.plan?.image_used || 0 }}/{{ overview.plan?.image_quota || 0 }}</span>
                 </div>
                 <a-progress :percent="quotaPercent(overview.plan?.image_used, overview.plan?.image_quota)" status="success" />
-                <a-button size="small" type="outline" @click="goBilling">升级套餐能力</a-button>
+                <a-button v-if="!isAllFreeMode" size="small" type="outline" @click="goBilling">升级套餐能力</a-button>
               </a-space>
             </a-card>
           </a-col>
@@ -126,7 +61,7 @@
                 </a-alert>
                 <div class="quota-line">
                   <span>草稿箱投递能力</span>
-                  <span>{{ overview.plan?.can_publish_wechat_draft ? '已开通' : '套餐未开通' }}</span>
+                  <span>{{ overview.plan?.can_publish_wechat_draft ? '已开通' : isAllFreeMode ? '免费开放中' : '套餐未开通' }}</span>
                 </div>
                 <a-button
                   size="small"
@@ -275,9 +210,15 @@
 
             <template #actions="{ record }">
               <a-space>
-                <a-button type="text" :loading="runningKey === `analyze:${record.id}`" @click="runTask('analyze', record)">分析</a-button>
-                <a-button type="text" :loading="runningKey === `create:${record.id}`" @click="openCreate(record)">创作</a-button>
-                <a-button type="text" :loading="runningKey === `rewrite:${record.id}`" @click="runTask('rewrite', record)">仿写</a-button>
+                <a-button type="text" :loading="runningKey === `analyze:${record.id}`" @click="handleModeAction('analyze', record)">
+                  {{ modeActionLabel('analyze', record) }}
+                </a-button>
+                <a-button type="text" :loading="runningKey === `create:${record.id}`" @click="handleModeAction('create', record)">
+                  {{ modeActionLabel('create', record) }}
+                </a-button>
+                <a-button type="text" :loading="runningKey === `rewrite:${record.id}`" @click="handleModeAction('rewrite', record)">
+                  {{ modeActionLabel('rewrite', record) }}
+                </a-button>
               </a-space>
             </template>
           </a-table>
@@ -387,6 +328,9 @@
       <a-space direction="vertical" style="width: 100%;">
         <a-space wrap>
           <a-button @click="copyResult">复制结果文本</a-button>
+          <a-button :loading="runningKey === `${resultData.mode}:${resultData.article_id}`" @click="regenerateCurrentResult">
+            {{ resultRegenerateLabel }}
+          </a-button>
           <a-button type="primary" @click="openPublish">发布到草稿箱</a-button>
           <a-tag color="arcoblue">{{ overview.plan?.label || '' }}</a-tag>
         </a-space>
@@ -412,7 +356,25 @@
           </a-collapse-item>
         </a-collapse>
 
-        <a-typography-paragraph style="white-space: pre-wrap;">{{ resultData.result || '' }}</a-typography-paragraph>
+        <div class="result-editor-wrap">
+          <div class="muted">Markdown 文稿（可编辑）。选中一段内容后可直接生成内容配图并插入文稿。</div>
+          <textarea
+            ref="resultEditorRef"
+            v-model="resultData.result"
+            class="result-editor"
+            placeholder="请先执行分析/创作/仿写生成结果"
+            @mouseup="captureResultSelection"
+            @keyup="captureResultSelection"
+            @select="captureResultSelection"
+          />
+        </div>
+
+        <div v-if="selectedResultText" class="inline-illustration-bar">
+          <span>已选中 {{ selectedResultText.length }} 字：{{ selectedResultTextPreview }}</span>
+          <a-button size="mini" type="primary" :loading="inlineImageLoading" @click="generateInlineImageFromSelection">
+            生成内容配图
+          </a-button>
+        </div>
       </a-space>
     </a-modal>
 
@@ -436,6 +398,9 @@
         <a-form-item label="封面图链接（可选）">
           <a-input v-model="publishForm.cover_url" placeholder="https://..." />
         </a-form-item>
+        <a-alert type="info" style="margin-bottom: 12px;">
+          公众号同步将自动读取个人中心中的 AppID/AppSecret（个人中心 -> 修改个人信息）。
+        </a-alert>
         <a-form-item label="同步公众号草稿箱">
           <a-switch v-model="publishForm.sync_to_wechat" />
           <span class="muted" style="margin-left: 8px;">关闭后只保存本地草稿箱</span>
@@ -462,6 +427,7 @@
           <a-button size="small" @click="copyCurrentDraft">复制草稿</a-button>
           <a-button size="small" @click="toggleDraftEdit">{{ draftEditing ? '取消编辑' : '编辑草稿' }}</a-button>
           <a-button v-if="draftEditing" size="small" type="primary" :loading="draftSaving" @click="saveCurrentDraft">保存修改</a-button>
+          <a-button size="small" type="primary" :loading="draftRegenerating" @click="regenerateCurrentDraft">重新生成</a-button>
           <a-button size="small" type="outline" :loading="draftSyncing" @click="openDraftSync">同步到公众号草稿箱</a-button>
           <a-button size="small" status="danger" :loading="draftDeleting" @click="removeCurrentDraft">删除草稿</a-button>
         </a-space>
@@ -476,9 +442,20 @@
             </a-form-item>
           </a-form>
         </template>
-        <a-typography-paragraph v-else style="white-space: pre-wrap; line-height: 1.75;">
-          {{ currentDraft?.content || '暂无内容' }}
-        </a-typography-paragraph>
+        <template v-else>
+          <div class="muted" style="margin-bottom: 4px; font-size: 12px;">Markdown 文稿。选中一段文字后可生成内容配图并插入草稿。</div>
+          <div
+            class="draft-rendered"
+            v-html="renderDraftMarkdown(currentDraft?.content || '')"
+            @mouseup="captureDraftSelection"
+          />
+          <div v-if="selectedDraftText" class="inline-illustration-bar">
+            <span>已选中 {{ selectedDraftText.length }} 字：{{ selectedDraftTextPreview }}</span>
+            <a-button size="mini" type="primary" :loading="draftInlineImageLoading" @click="generateInlineImageFromDraftSelection">
+              生成内容配图
+            </a-button>
+          </div>
+        </template>
       </a-space>
     </a-modal>
 
@@ -507,6 +484,9 @@
         <a-form-item label="封面图链接（可选）">
           <a-input v-model="draftSyncForm.cover_url" placeholder="https://..." />
         </a-form-item>
+        <a-alert type="info" style="margin-bottom: 12px;">
+          将自动读取个人中心中的 AppID/AppSecret；若未配置，后端会返回引导提示。
+        </a-alert>
         <a-form-item label="失败自动进入重试队列">
           <a-switch v-model="draftSyncForm.queue_on_fail" />
         </a-form-item>
@@ -551,11 +531,10 @@
 
 <script setup lang="ts">
 import { computed, inject, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { marked } from 'marked'
 import { Message, Modal } from '@arco-design/web-vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  getAIProfile,
-  updateAIProfile,
   aiAnalyze,
   aiCreate,
   aiRewrite,
@@ -567,6 +546,7 @@ import {
   deleteDraft,
   syncDraftToWechat,
   publishDraft,
+  generateInlineIllustration,
   getPublishTasks,
   processPublishTasks,
   retryPublishTask,
@@ -577,6 +557,7 @@ import {
 } from '@/api/ai'
 import { getArticles } from '@/api/article'
 import { getSubscriptions } from '@/api/subscription'
+import { loadRuntimeSettings } from '@/utils/runtime'
 
 import logoWechat from '@/assets/platform/wechat.svg'
 import logoXhs from '@/assets/platform/xiaohongshu.svg'
@@ -584,38 +565,31 @@ import logoZhihu from '@/assets/platform/zhihu.svg'
 import logoTwitter from '@/assets/platform/twitter.svg'
 
 type StudioSection = 'workbench' | 'drafts' | 'queue'
+type ComposeMode = 'analyze' | 'create' | 'rewrite'
 type SectionTab = {
   key: StudioSection
   label: string
 }
-type ResultSnapshot = {
-  title: string
-  sourceTitle: string
-  data: AIComposeResult
-}
-
-const RESULT_CACHE_PREFIX = 'studio:result:'
 const WECHAT_WHITELIST_REMINDER_NEVER_KEY = 'studio:wechat-whitelist-reminder:never'
+const DRAFT_LOOKUP_LIMIT = 200  // 匹配后端 API 最大限制 (le=200)
 
 const showAuthQrcode = inject<() => void>('showAuthQrcode')
 const globalWxAuthReady = inject<{ value: boolean } | null>('wxAuthReady', null)
 const route = useRoute()
 const router = useRouter()
 
-const profile = reactive({
-  base_url: 'https://api.moonshot.cn/v1',
-  model_name: 'kimi-k2-0711-preview',
-  api_key: '',
-  temperature: 70,
-})
-
 const overviewLoading = ref(false)
 const draftLoading = ref(false)
 const queueLoading = ref(false)
 const processingQueue = ref(false)
-const saving = ref(false)
 const loading = ref(false)
 const runningKey = ref('')
+const runtimeSettings = ref({
+  product_mode: 'all_free',
+  is_all_free: true,
+  billing_visible: false,
+  analytics_enabled: true,
+})
 
 const overview = reactive<any>({
   plan: null,
@@ -658,6 +632,7 @@ const draftEditing = ref(false)
 const draftSaving = ref(false)
 const draftDeleting = ref(false)
 const draftSyncing = ref(false)
+const draftRegenerating = ref(false)
 const draftEditForm = reactive({
   title: '',
   content: '',
@@ -684,14 +659,24 @@ const createForm = reactive({
 
 const resultVisible = ref(false)
 const resultTitle = ref('创作结果')
+const resultEditorRef = ref<HTMLTextAreaElement | null>(null)
+const selectedResultText = ref('')
+const inlineImageLoading = ref(false)
+const selectedDraftText = ref('')
+const draftInlineImageLoading = ref(false)
 const resultData = reactive<AIComposeResult>({
   article_id: '',
   mode: 'create',
   result: '',
+  source_title: '',
   recommended_tags: [],
   image_prompts: [],
   images: [],
   image_notice: '',
+  options: {},
+  from_cache: false,
+  cached_at: '',
+  result_id: '',
 })
 
 const publishVisible = ref(false)
@@ -716,41 +701,24 @@ const parseQueryPage = () => {
   return Number.isFinite(value) && value > 0 ? value : 1
 }
 
-const isDraftboxRoute = computed(() => route.path.startsWith('/workspace/draftbox'))
+const isAllFreeMode = computed(() => !!runtimeSettings.value?.is_all_free)
 const activeArticleId = computed(() => getQueryText('article_id'))
 const activeModeFromQuery = computed(() => getQueryText('mode'))
 const activeDraftId = computed(() => getQueryText('draft_id'))
-const pageTitle = computed(() => (isDraftboxRoute.value ? '草稿箱' : '创作中台'))
-const pageDesc = computed(() =>
-  isDraftboxRoute.value
-    ? '本地草稿管理与公众号投递队列分离展示，减少页面干扰。'
-    : '将创作工作台、草稿管理和投递队列拆分为子页面，提高操作聚焦度。'
-)
+const pageTitle = computed(() => '创作中台')
+const pageDesc = computed(() => '将创作工作台、草稿管理和投递队列拆分为子页面，提高操作聚焦度。')
 const activeSection = computed<StudioSection>(() => {
   const section = getQueryText('section').trim().toLowerCase()
   if (section === 'queue') return 'queue'
-  if (section === 'drafts' || activeDraftId.value || isDraftboxRoute.value) return 'drafts'
+  if (section === 'drafts' || activeDraftId.value) return 'drafts'
   return 'workbench'
 })
 const sectionTabs = computed<SectionTab[]>(() => {
-  if (isDraftboxRoute.value) {
-    return [
-      { key: 'drafts', label: '本地草稿' },
-      { key: 'queue', label: '投递队列' },
-    ]
-  }
   return [
     { key: 'workbench', label: '创作工作台' },
     { key: 'drafts', label: '本地草稿' },
     { key: 'queue', label: '投递队列' },
   ]
-})
-
-const planTagColor = computed(() => {
-  const tier = overview.plan?.tier || 'free'
-  if (tier === 'premium') return 'purple'
-  if (tier === 'pro') return 'arcoblue'
-  return 'gray'
 })
 const isWechatAuthorized = computed(() => !!overview.wechat_auth?.authorized || !!globalWxAuthReady?.value)
 const whitelistIps = computed<string[]>(() => {
@@ -773,6 +741,25 @@ const activitySuccessRateText = computed(() => {
   const value = Number(overview.activity?.publish_success_rate_7d)
   return Number.isFinite(value) ? `${value.toFixed(2)}%` : '--'
 })
+const resultRegenerateLabel = computed(() => {
+  if (resultData.mode === 'analyze') return '重新分析'
+  if (resultData.mode === 'rewrite') return '重新仿写'
+  return '重新创作'
+})
+const selectedResultTextPreview = computed(() => {
+  const text = String(selectedResultText.value || '').trim()
+  if (!text) return ''
+  return text.length > 42 ? `${text.slice(0, 42)}...` : text
+})
+const selectedDraftTextPreview = computed(() => {
+  const text = String(selectedDraftText.value || '').trim()
+  if (!text) return ''
+  return text.length > 42 ? `${text.slice(0, 42)}...` : text
+})
+const renderDraftMarkdown = (content: string): string => {
+  if (!content) return '<p style="color:var(--color-text-3)">暂无内容</p>'
+  return marked.parse(content) as string
+}
 const activityDraftMax = computed(() =>
   Math.max(1, ...activityTrend.value.map((item: any) => Number(item?.drafts || 0)))
 )
@@ -788,6 +775,28 @@ const activitySuccessPercent = (value: number) => {
   const count = Math.max(0, Number(value || 0))
   if (!count) return 0
   return Math.max(8, Math.round((count / activitySuccessMax.value) * 100))
+}
+
+const latestDraftByArticleMode = computed<Record<string, DraftRecord>>(() => {
+  const mapping: Record<string, DraftRecord> = {}
+  ;(drafts.value || []).forEach((item) => {
+    const articleId = String(item?.article_id || '').trim()
+    const mode = String(item?.mode || '').trim().toLowerCase()
+    if (!articleId || !mode) return
+    const key = `${articleId}:${mode}`
+    if (!mapping[key]) mapping[key] = item
+  })
+  return mapping
+})
+
+const getDraftForMode = (record: any, mode: ComposeMode): DraftRecord | null => {
+  const articleId = String(record?.id || '').trim()
+  if (!articleId) return null
+  return latestDraftByArticleMode.value[`${articleId}:${mode}`] || null
+}
+
+const modeActionLabel = (mode: ComposeMode, record: any) => {
+  return getDraftForMode(record, mode) ? '查看' : (mode === 'analyze' ? '分析' : mode === 'create' ? '创作' : '仿写')
 }
 
 const columns = [
@@ -830,6 +839,10 @@ const openAuth = () => {
 }
 
 const goBilling = () => {
+  if (isAllFreeMode.value) {
+    Message.info('当前处于全站免费模式，套餐与支付面板暂未开放')
+    return
+  }
   router.push('/workspace/billing')
 }
 
@@ -878,21 +891,13 @@ const initFiltersFromQuery = () => {
   pagination.current = parseQueryPage()
 }
 
-const scrollToAIConfig = () => {
-  const el = document.getElementById('ai-profile-anchor')
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
-
 const handleActionableError = (error: any) => {
-  const msg = String(error || '操作失败')
+  // Extract error message from various error formats
+  const msg = error instanceof Error
+    ? error.message
+    : String(error?.message || error?.response?.data?.message || error || '操作失败')
   if (msg.includes('API Key') || msg.includes('AI 配置')) {
-    Modal.confirm({
-      title: '需要先配置 AI Key',
-      content: '请先在「AI 创作配置」中填写并保存 API Key，再重新执行。',
-      okText: '去配置',
-      hideCancel: false,
-      onOk: () => scrollToAIConfig(),
-    })
+    Message.error('平台 AI 服务暂不可用，请稍后重试或联系管理员')
     return
   }
   if (msg.includes('公众号') && msg.includes('授权')) {
@@ -925,30 +930,6 @@ const openArticle = (id: string) => {
   window.open(`/views/article/${id}?auto_fetch=1`, '_blank')
 }
 
-const loadProfile = async () => {
-  const data = await getAIProfile()
-  profile.base_url = data.base_url || profile.base_url
-  profile.model_name = data.model_name || profile.model_name
-  profile.temperature = data.temperature ?? profile.temperature
-  profile.api_key = ''
-}
-
-const saveProfile = async () => {
-  try {
-    saving.value = true
-    await updateAIProfile({
-      base_url: profile.base_url,
-      model_name: profile.model_name,
-      api_key: profile.api_key,
-      temperature: profile.temperature,
-    })
-    Message.success('AI 配置已保存')
-    profile.api_key = ''
-  } finally {
-    saving.value = false
-  }
-}
-
 const loadComposeMeta = async () => {
   const data = await getComposeOptions()
   composePlatforms.value = data.platforms || []
@@ -977,7 +958,7 @@ const refreshOverview = async () => {
 const fetchDrafts = async () => {
   draftLoading.value = true
   try {
-    drafts.value = await getDrafts(30)
+    drafts.value = await getDrafts(DRAFT_LOOKUP_LIMIT)
     if (activeDraftId.value) {
       nextTick(() => scrollToActiveDraft('auto'))
     }
@@ -1197,6 +1178,63 @@ const openDraftSync = () => {
   openWhitelistReminder()
 }
 
+const regenerateCurrentDraft = async () => {
+  if (!currentDraft.value) {
+    Message.warning('草稿不存在')
+    return
+  }
+
+  const articleId = String(currentDraft.value.article_id || '').trim()
+  const mode = String(currentDraft.value.mode || '').trim().toLowerCase() as ComposeMode
+
+  if (!articleId || !mode) {
+    Message.warning('缺少文章ID或模式信息，无法重新生成')
+    return
+  }
+
+  // 关闭草稿详情弹窗
+  draftDetailVisible.value = false
+
+  // 获取文章记录
+  const articleRecord = getArticleRecordById(articleId)
+
+  // 根据模式执行重新生成
+  if (mode === 'analyze' || mode === 'rewrite') {
+    await runTask(mode as 'analyze' | 'rewrite', articleRecord, true)
+  } else if (mode === 'create') {
+    // 对于创作模式，使用草稿的 metadata 中的选项
+    const metadata = (currentDraft.value.metadata || {}) as Record<string, any>
+    const options = metadata.options || {}
+
+    const key = `create:${articleId}`
+    runningKey.value = key
+    Message.info('正在重新创作，请稍候...')
+
+    try {
+      const payload = {
+        instruction: String(options.instruction || metadata.instruction || ''),
+        platform: String(options.platform || 'wechat'),
+        style: String(options.style || '专业深度'),
+        length: String(options.length || 'medium'),
+        image_count: Number(options.image_count ?? 1),
+        audience: String(options.audience || ''),
+        tone: String(options.tone || ''),
+        generate_images: Boolean(options.generate_images ?? true),
+        force_refresh: true,
+      }
+
+      const res = await aiCreate(articleId, payload)
+      fillResult('创作结果', articleRecord.title || '', res)
+      await refreshOverview()
+      await fetchDrafts()
+    } catch (e: any) {
+      handleActionableError(e)
+    } finally {
+      runningKey.value = ''
+    }
+  }
+}
+
 const submitDraftSync = async () => {
   if (!currentDraft.value?.id) {
     Message.error('草稿不存在')
@@ -1249,68 +1287,6 @@ const applyPlan = (plan?: any) => {
   overview.plan = plan
 }
 
-const buildResultCacheKey = (articleId: string, mode: string) => {
-  return `${RESULT_CACHE_PREFIX}${articleId}:${mode}`
-}
-
-const cacheResultSnapshot = (title: string, sourceTitle: string, res: any) => {
-  const articleId = String(res?.article_id || '').trim()
-  const mode = String(res?.mode || '').trim()
-  if (!articleId || !mode) return
-  const snapshot: ResultSnapshot = {
-    title: title || '创作结果',
-    sourceTitle: sourceTitle || '',
-    data: {
-      article_id: articleId,
-      mode: mode as any,
-      result: String(res?.result || ''),
-      recommended_tags: Array.isArray(res?.recommended_tags) ? res.recommended_tags : [],
-      image_prompts: Array.isArray(res?.image_prompts) ? res.image_prompts : [],
-      images: Array.isArray(res?.images) ? res.images : [],
-      image_notice: String(res?.image_notice || ''),
-      options: res?.options || {},
-      plan: res?.plan,
-    },
-  }
-  sessionStorage.setItem(buildResultCacheKey(articleId, mode), JSON.stringify(snapshot))
-}
-
-const applyResultSnapshot = (snapshot: ResultSnapshot, syncQuery: boolean) => {
-  const data = snapshot?.data || ({} as AIComposeResult)
-  resultTitle.value = snapshot?.title || '创作结果'
-  resultSourceTitle.value = snapshot?.sourceTitle || ''
-  resultData.article_id = data.article_id || ''
-  resultData.mode = (data.mode || 'create') as any
-  resultData.result = data.result || ''
-  resultData.recommended_tags = data.recommended_tags || []
-  resultData.image_prompts = data.image_prompts || []
-  resultData.images = data.images || []
-  resultData.image_notice = data.image_notice || ''
-  applyPlan(data.plan)
-  resultVisible.value = true
-  if (syncQuery) {
-    setStudioQuery({
-      article_id: resultData.article_id || undefined,
-      mode: resultData.mode || undefined,
-    })
-  }
-}
-
-const restoreResultSnapshotFromQuery = () => {
-  const articleId = activeArticleId.value
-  const mode = activeModeFromQuery.value
-  if (!articleId || !mode) return false
-  const raw = sessionStorage.getItem(buildResultCacheKey(articleId, mode))
-  if (!raw) return false
-  try {
-    const snapshot = JSON.parse(raw) as ResultSnapshot
-    applyResultSnapshot(snapshot, false)
-    return true
-  } catch (error) {
-    return false
-  }
-}
-
 const scrollToActiveDraft = (behavior: ScrollBehavior = 'smooth') => {
   if (!activeDraftId.value) return
   const el = document.getElementById(`draft-item-${activeDraftId.value}`)
@@ -1324,14 +1300,19 @@ const articleRowClass = ({ record }: any) => {
 
 const fillResult = (title: string, sourceTitle: string, res: any) => {
   resultTitle.value = title
-  resultSourceTitle.value = sourceTitle || ''
+  resultSourceTitle.value = sourceTitle || res.source_title || ''
   resultData.article_id = res.article_id || ''
   resultData.mode = res.mode || 'create'
   resultData.result = res.result || ''
+  resultData.source_title = res.source_title || sourceTitle || ''
   resultData.recommended_tags = res.recommended_tags || []
   resultData.image_prompts = res.image_prompts || []
   resultData.images = res.images || []
   resultData.image_notice = res.image_notice || ''
+  resultData.options = res.options || {}
+  resultData.from_cache = !!res.from_cache
+  resultData.cached_at = res.cached_at || ''
+  resultData.result_id = res.result_id || ''
   applyPlan(res.plan)
   resultVisible.value = true
   setStudioQuery({
@@ -1339,16 +1320,17 @@ const fillResult = (title: string, sourceTitle: string, res: any) => {
     mode: resultData.mode || undefined,
     draft_id: undefined,
   }, 'push')
-  cacheResultSnapshot(title, sourceTitle, res)
   if (resultData.image_notice && resultData.image_notice.includes('自动回退')) {
     Message.warning(resultData.image_notice)
   }
 }
 
-const runTask = async (mode: 'analyze' | 'rewrite', record: any) => {
+const runTask = async (mode: 'analyze' | 'rewrite', record: any, forceRefresh: boolean = false) => {
   const key = `${mode}:${record.id}`
   runningKey.value = key
-  Message.info(`${mode === 'analyze' ? '正在分析' : '正在仿写'}，请稍候...`)
+  Message.info(
+    `${mode === 'analyze' ? (forceRefresh ? '正在重新分析' : '正在分析') : (forceRefresh ? '正在重新仿写' : '正在仿写')}，请稍候...`
+  )
   try {
     const payload = {
       instruction: quickInstruction.value || '',
@@ -1359,9 +1341,12 @@ const runTask = async (mode: 'analyze' | 'rewrite', record: any) => {
       audience: createForm.audience,
       tone: createForm.tone,
       generate_images: false,
+      force_refresh: forceRefresh,
     }
     const res = mode === 'analyze' ? await aiAnalyze(record.id, payload) : await aiRewrite(record.id, payload)
     fillResult(mode === 'analyze' ? '分析结果' : '仿写结果', record.title || '', res)
+    await refreshOverview()
+    await fetchDrafts()
   } catch (e: any) {
     handleActionableError(e)
   } finally {
@@ -1373,6 +1358,19 @@ const openCreate = (record: any) => {
   currentCreateArticle.value = record
   createForm.instruction = quickInstruction.value || ''
   createVisible.value = true
+}
+
+const handleModeAction = async (mode: ComposeMode, record: any) => {
+  const existing = getDraftForMode(record, mode)
+  if (existing) {
+    openDraftDetail(existing)
+    return
+  }
+  if (mode === 'create') {
+    openCreate(record)
+    return
+  }
+  await runTask(mode, record)
 }
 
 const submitCreate = async () => {
@@ -1395,14 +1393,206 @@ const submitCreate = async () => {
       audience: createForm.audience,
       tone: createForm.tone,
       generate_images: createForm.generate_images,
+      force_refresh: false,
     }
     const res = await aiCreate(record.id, payload)
     fillResult('创作结果', record.title || '', res)
+    await refreshOverview()
     await fetchDrafts()
   } catch (e: any) {
     handleActionableError(e)
   } finally {
     runningKey.value = ''
+  }
+}
+
+const getArticleRecordById = (articleId: string) => {
+  const target = articles.value.find((item: any) => String(item?.id || '') === String(articleId || ''))
+  if (target) return target
+  return {
+    id: articleId,
+    title: resultSourceTitle.value || resultData.source_title || '未命名文章',
+  }
+}
+
+const createPayloadFromResultOptions = (forceRefresh: boolean) => {
+  const opts = (resultData.options || {}) as Record<string, any>
+  return {
+    instruction: createForm.instruction || quickInstruction.value || '',
+    platform: String(opts.platform || createForm.platform || 'wechat'),
+    style: String(opts.style || createForm.style || '专业深度'),
+    length: String(opts.length || createForm.length || 'medium'),
+    image_count: Number(opts.image_count ?? createForm.image_count ?? 1),
+    audience: String(opts.audience || createForm.audience || ''),
+    tone: String(opts.tone || createForm.tone || ''),
+    generate_images: Boolean(opts.generate_images ?? createForm.generate_images),
+    force_refresh: forceRefresh,
+  }
+}
+
+const regenerateCurrentResult = async () => {
+  const articleId = String(resultData.article_id || '').trim()
+  const mode = String(resultData.mode || '').trim()
+  if (!articleId || !mode) {
+    Message.warning('缺少结果上下文，无法重新生成')
+    return
+  }
+
+  if (mode === 'analyze' || mode === 'rewrite') {
+    await runTask(mode as 'analyze' | 'rewrite', getArticleRecordById(articleId), true)
+    return
+  }
+
+  const key = `create:${articleId}`
+  runningKey.value = key
+  Message.info('正在重新创作，请稍候...')
+  try {
+    const payload = createPayloadFromResultOptions(true)
+    const res = await aiCreate(articleId, payload)
+    fillResult('创作结果', resultSourceTitle.value || resultData.source_title || '', res)
+    await refreshOverview()
+    await fetchDrafts()
+  } catch (e: any) {
+    handleActionableError(e)
+  } finally {
+    runningKey.value = ''
+  }
+}
+
+const captureResultSelection = () => {
+  const el = resultEditorRef.value
+  if (!el) {
+    selectedResultText.value = ''
+    return
+  }
+  const start = Number(el.selectionStart || 0)
+  const end = Number(el.selectionEnd || 0)
+  if (end <= start) {
+    selectedResultText.value = ''
+    return
+  }
+  const selected = String(resultData.result || '').slice(start, end).trim()
+  selectedResultText.value = selected.slice(0, 1200)
+}
+
+const insertMarkdownImageAtSelection = (imageUrl: string) => {
+  const content = String(resultData.result || '')
+  const el = resultEditorRef.value
+  const markdown = `\n\n![内容配图](${imageUrl})\n\n`
+  if (el) {
+    const start = Number(el.selectionStart || 0)
+    const end = Number(el.selectionEnd || 0)
+    if (end > start) {
+      resultData.result = `${content.slice(0, end)}${markdown}${content.slice(end)}`
+      return
+    }
+  }
+  const selected = String(selectedResultText.value || '').trim()
+  if (selected) {
+    const idx = content.indexOf(selected)
+    if (idx >= 0) {
+      const tailStart = idx + selected.length
+      resultData.result = `${content.slice(0, tailStart)}${markdown}${content.slice(tailStart)}`
+      return
+    }
+  }
+  resultData.result = `${content}\n\n![内容配图](${imageUrl})`
+}
+
+const generateInlineImageFromSelection = async () => {
+  if (!resultData.article_id) {
+    Message.warning('缺少文章ID，无法生成配图')
+    return
+  }
+  const selected = String(selectedResultText.value || '').trim()
+  if (!selected) {
+    Message.warning('请先选中一段内容')
+    return
+  }
+  inlineImageLoading.value = true
+  try {
+    const resp = await generateInlineIllustration(resultData.article_id, {
+      selected_text: selected,
+      context_text: String(resultData.result || ''),
+      platform: String((resultData.options as any)?.platform || createForm.platform || 'wechat'),
+      style: String((resultData.options as any)?.style || createForm.style || '专业深度'),
+    })
+    if (resp?.image_url) {
+      insertMarkdownImageAtSelection(resp.image_url)
+      if (!Array.isArray(resultData.images)) {
+        resultData.images = []
+      }
+      resultData.images = [resp.image_url, ...(resultData.images || []).filter((x: any) => String(x || '').trim() && String(x || '').trim() !== resp.image_url)]
+      Message.success('内容配图已生成并插入文稿')
+    } else {
+      Message.warning(resp?.image_notice || '未返回图片，已生成提示词')
+    }
+    if (resp?.image_notice) {
+      resultData.image_notice = String(resp.image_notice || '')
+    }
+    if (resp?.plan) applyPlan(resp.plan)
+  } catch (e: any) {
+    handleActionableError(e)
+  } finally {
+    inlineImageLoading.value = false
+  }
+}
+
+const captureDraftSelection = () => {
+  const selection = window.getSelection()
+  if (!selection || selection.isCollapsed) {
+    selectedDraftText.value = ''
+    return
+  }
+  const text = selection.toString().trim()
+  selectedDraftText.value = text ? text.slice(0, 1200) : ''
+}
+
+const generateInlineImageFromDraftSelection = async () => {
+  const draft = currentDraft.value
+  if (!draft?.article_id) {
+    Message.warning('缺少文章ID，无法生成配图')
+    return
+  }
+  const selected = String(selectedDraftText.value || '').trim()
+  if (!selected) {
+    Message.warning('请先选中一段内容')
+    return
+  }
+  draftInlineImageLoading.value = true
+  try {
+    const resp = await generateInlineIllustration(draft.article_id, {
+      selected_text: selected,
+      context_text: String(draft.content || ''),
+      platform: String((draft.metadata as any)?.options?.platform || 'wechat'),
+      style: String((draft.metadata as any)?.options?.style || '专业深度'),
+    })
+    if (resp?.image_url) {
+      const content = String(draft.content || '')
+      const markdown = `\n\n![内容配图](${resp.image_url})\n\n`
+      const idx = content.indexOf(selected)
+      const newContent = idx >= 0
+        ? `${content.slice(0, idx + selected.length)}${markdown}${content.slice(idx + selected.length)}`
+        : `${content}${markdown}`
+      const updated = await updateDraft(draft.id, {
+        title: draft.title,
+        content: newContent,
+        platform: draft.platform,
+        mode: draft.mode,
+      })
+      currentDraft.value = updated
+      const listIdx = drafts.value.findIndex((item) => item.id === updated.id)
+      if (listIdx >= 0) drafts.value[listIdx] = updated
+      selectedDraftText.value = ''
+      Message.success('内容配图已生成并插入草稿')
+    } else {
+      Message.warning(resp?.image_notice || '未返回图片，已生成提示词')
+    }
+    if (resp?.plan) applyPlan(resp.plan)
+  } catch (e: any) {
+    handleActionableError(e)
+  } finally {
+    draftInlineImageLoading.value = false
   }
 }
 
@@ -1500,9 +1690,6 @@ const refreshAll = async () => {
 }
 
 const restoreFromRouteQuery = () => {
-  if (restoreResultSnapshotFromQuery()) {
-    return
-  }
   if (activeDraftId.value) {
     const target = drafts.value.find((item) => String(item?.id || '') === String(activeDraftId.value))
     if (target) {
@@ -1513,19 +1700,27 @@ const restoreFromRouteQuery = () => {
     return
   }
   if (activeArticleId.value) {
-    if (activeModeFromQuery.value === 'create') {
-      const targetArticle = articles.value.find((item: any) => String(item?.id || '') === activeArticleId.value)
-      if (targetArticle) {
-        currentCreateArticle.value = targetArticle
-        createForm.instruction = quickInstruction.value || ''
-        createVisible.value = true
+    const mode = String(activeModeFromQuery.value || '').trim().toLowerCase() as ComposeMode
+    if (mode === 'analyze' || mode === 'create' || mode === 'rewrite') {
+      const linkedDraft = latestDraftByArticleMode.value[`${activeArticleId.value}:${mode}`]
+      if (linkedDraft) {
+        openDraftDetail(linkedDraft, false)
+        return
       }
+    }
+    if (mode === 'create') {
+      const targetArticle = articles.value.find((item: any) => String(item?.id || '') === activeArticleId.value)
+      if (!targetArticle) return
+      currentCreateArticle.value = targetArticle
+      createForm.instruction = quickInstruction.value || ''
+      createVisible.value = true
     }
   }
 }
 
 watch(resultVisible, (visible) => {
   if (!visible) {
+    selectedResultText.value = ''
     setStudioQuery({
       article_id: undefined,
       mode: undefined,
@@ -1538,6 +1733,7 @@ watch(draftDetailVisible, (visible) => {
     currentDraft.value = null
     draftEditing.value = false
     draftSyncVisible.value = false
+    selectedDraftText.value = ''
     setStudioQuery({
       draft_id: undefined,
     })
@@ -1581,14 +1777,11 @@ watch(
 )
 
 onMounted(async () => {
+  runtimeSettings.value = await loadRuntimeSettings()
   initFiltersFromQuery()
-  await loadProfile()
   await loadComposeMeta()
   await fetchMps()
   await refreshAll()
-  if (isDraftboxRoute.value && !getQueryText('section')) {
-    setStudioQuery({ section: 'drafts' })
-  }
   restoreFromRouteQuery()
 })
 </script>
@@ -1634,28 +1827,12 @@ onMounted(async () => {
 
 .studio-layout {
   display: grid;
-  grid-template-columns: 332px minmax(0, 1fr);
-  gap: 14px;
-}
-
-.studio-layout.draftbox-mode {
   grid-template-columns: minmax(0, 1fr);
-}
-
-.studio-tools {
-  display: grid;
-  gap: 12px;
-  height: fit-content;
-  position: sticky;
-  top: 10px;
+  gap: 14px;
 }
 
 .studio-display {
   min-width: 0;
-}
-
-.studio-display.full {
-  width: 100%;
 }
 
 .summary-row {
@@ -1664,12 +1841,6 @@ onMounted(async () => {
 
 .summary-card {
   min-height: 206px;
-}
-
-.plan-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
 }
 
 .quota-line {
@@ -1860,6 +2031,88 @@ onMounted(async () => {
   gap: 12px;
 }
 
+.result-editor-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.result-editor {
+  width: 100%;
+  min-height: 360px;
+  resize: vertical;
+  border: 1px solid #dce6f8;
+  border-radius: 10px;
+  padding: 12px;
+  font-family: 'SFMono-Regular', 'JetBrains Mono', 'Menlo', monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-1);
+  background: #fbfdff;
+}
+
+.inline-illustration-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #1e3a8a;
+  font-size: 12px;
+}
+
+.draft-rendered {
+  padding: 12px 16px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 8px;
+  line-height: 1.8;
+  min-height: 200px;
+  font-size: 14px;
+  color: var(--color-text-1);
+  user-select: text;
+  cursor: text;
+  overflow-wrap: break-word;
+
+  :deep(img) {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 8px 0;
+    border-radius: 4px;
+  }
+
+  :deep(h1), :deep(h2), :deep(h3) {
+    margin: 16px 0 8px;
+    font-weight: 600;
+  }
+
+  :deep(p) {
+    margin: 6px 0;
+  }
+
+  :deep(ul), :deep(ol) {
+    padding-left: 20px;
+    margin: 6px 0;
+  }
+
+  :deep(blockquote) {
+    border-left: 3px solid var(--color-border-3);
+    padding-left: 12px;
+    color: var(--color-text-3);
+    margin: 8px 0;
+  }
+
+  :deep(code) {
+    background: var(--color-fill-2);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+}
+
 .image-card {
   display: flex;
   flex-direction: column;
@@ -1914,10 +2167,6 @@ onMounted(async () => {
 @media (max-width: 1200px) {
   .studio-layout {
     grid-template-columns: 1fr;
-  }
-
-  .studio-tools {
-    position: static;
   }
 
   .platform-grid {

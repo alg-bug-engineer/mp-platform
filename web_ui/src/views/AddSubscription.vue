@@ -138,6 +138,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Message, Modal } from '@arco-design/web-vue'
 import { Avatar } from '@/utils/constants'
+import { getWechatAuthStatus } from '@/api/auth'
 import {
   addSubscription,
   deleteMpApi,
@@ -288,13 +289,16 @@ const submitForm = async () => {
   if (!validateForm()) return
   submitting.value = true
   try {
-    await addSubscription({
+    const data: any = await addSubscription({
       mp_name: form.name.trim(),
       mp_id: form.wx_id.trim(),
       avatar: form.avatar.trim(),
       mp_intro: form.description.trim(),
     })
     Message.success('订阅添加成功')
+    if (data?.fetch_scheduled === false) {
+      Message.warning('订阅已添加，但首次抓取未启动，请先确认当前账号公众号授权状态')
+    }
     resetForm()
     await loadSubscriptions()
   } catch (e: any) {
@@ -340,6 +344,16 @@ const goBack = () => {
 }
 
 onMounted(loadSubscriptions)
+onMounted(async () => {
+  try {
+    const auth = await getWechatAuthStatus(true)
+    if (!auth?.authorized) {
+      Message.warning('当前账号公众号授权已失效，请先重新扫码授权后再检索公众号')
+    }
+  } catch {
+    // ignored
+  }
+})
 </script>
 
 <style scoped>

@@ -1,17 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
 from core.auth import get_current_user
 from core.db import DB
 from core.models import User as DBUser
 from core.auth import pwd_context
 import os
 import uuid
+import json
 from datetime import datetime
+from sqlalchemy import func, or_
 from core.plan_service import (
     get_user_plan_summary,
     get_plan_catalog,
     normalize_plan_tier,
     get_plan_definition,
 )
+from core.wechat_auth_service import serialize_wechat_auth, get_wechat_auth
 from .base import success_response, error_response
 router = APIRouter(prefix="/user", tags=["用户管理"])
 
@@ -49,6 +52,8 @@ async def get_user_info(current_user: dict = Depends(get_current_user)):
             "nickname": user.nickname if user.nickname else user.username,
             "avatar": user.avatar if user.avatar else "/static/default-avatar.png",
             "email": user.email if user.email else "",
+            "wechat_app_id": str(getattr(user, "wechat_app_id", "") or ""),
+            "wechat_app_secret_set": bool(str(getattr(user, "wechat_app_secret", "") or "").strip()),
             "role": user.role,
             "is_active": user.is_active,
             "plan": {
@@ -72,25 +77,94 @@ async def get_user_info(current_user: dict = Depends(get_current_user)):
 async def get_user_list(
     current_user: dict = Depends(get_current_user),
     page: int = 1,
-    page_size: int = 10
+    page_size: int = 10,
+    keyword: str = Query("", max_length=120),
 ):
     """获取所有用户列表（仅管理员可用）"""
     session = DB.get_session()
     try:
         _require_admin(current_user)
 
-        # 查询用户总数
-        total = session.query(DBUser).count()
+        query = session.query(DBUser)
+        kw = str(keyword or "").strip()
+        if kw:
+            fuzzy = f"%{kw}%"
+            query = query.filter(
+                or_(
+                    DBUser.username.like(fuzzy),
+                    DBUser.phone.like(fuzzy),
+                    DBUser.nickname.like(fuzzy),
+                )
+            )
 
-        # 分页查询用户列表
-        users = session.query(DBUser).order_by(DBUser.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+        total = query.count()
+        users = (
+            query.order_by(DBUser.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
+        usernames = [str(item.username or "").strip() for item in users if str(item.username or "").strip()]
+        auth_map = {}
+        mp_count_map = {}
+        article_count_map = {}
+        event_map = {}
+
+        if usernames:
+            from core.models.wechat_auth import WechatAuth
+            from core.models.feed import Feed
+            from core.models.article import Article
+            from core.models.analytics_event import AnalyticsEvent
+
+            auth_rows = session.query(WechatAuth).filter(WechatAuth.owner_id.in_(usernames)).all()
+            auth_map = {str(item.owner_id or "").strip(): item for item in auth_rows if str(item.owner_id or "").strip()}
+
+            mp_rows = (
+                session.query(Feed.owner_id, func.count(Feed.id).label("count"))
+                .filter(Feed.owner_id.in_(usernames))
+                .group_by(Feed.owner_id)
+                .all()
+            )
+            mp_count_map = {str(row[0] or "").strip(): int(row[1] or 0) for row in mp_rows if str(row[0] or "").strip()}
+
+            article_rows = (
+                session.query(Article.owner_id, func.count(Article.id).label("count"))
+                .filter(Article.owner_id.in_(usernames))
+                .group_by(Article.owner_id)
+                .all()
+            )
+            article_count_map = {str(row[0] or "").strip(): int(row[1] or 0) for row in article_rows if str(row[0] or "").strip()}
+
+            event_rows = (
+                session.query(
+                    AnalyticsEvent.username,
+                    func.count(AnalyticsEvent.id).label("event_count"),
+                    func.max(AnalyticsEvent.created_at).label("last_active"),
+                )
+                .filter(AnalyticsEvent.username.in_(usernames))
+                .group_by(AnalyticsEvent.username)
+                .all()
+            )
+            for row in event_rows:
+                uname = str(getattr(row, "username", "") or "").strip()
+                if not uname:
+                    continue
+                event_map[uname] = {
+                    "event_count": int(getattr(row, "event_count", 0) or 0),
+                    "last_active": getattr(row, "last_active", None),
+                }
 
         # 格式化返回数据
         user_list = []
         for user in users:
+            username = str(user.username or "").strip()
             plan = get_user_plan_summary(user)
+            auth_item = auth_map.get(username)
+            auth_serialized = serialize_wechat_auth(auth_item, mask=True)
+            event_info = event_map.get(username, {})
             user_list.append({
-                "username": user.username,
+                "username": username,
                 "phone": user.phone or "",
                 "nickname": user.nickname if user.nickname else user.username,
                 "avatar": user.avatar if user.avatar else "/static/default-avatar.png",
@@ -100,7 +174,15 @@ async def get_user_list(
                 "plan_tier": plan["tier"],
                 "plan_label": plan["label"],
                 "ai_quota": plan["ai_quota"],
+                "ai_used": plan["ai_used"],
                 "image_quota": plan["image_quota"],
+                "image_used": plan["image_used"],
+                "wechat_authorized": bool(auth_serialized.get("authorized")),
+                "wechat_auth": auth_serialized,
+                "mp_count": int(mp_count_map.get(username, 0)),
+                "article_count": int(article_count_map.get(username, 0)),
+                "event_count": int(event_info.get("event_count", 0) or 0),
+                "last_active": event_info.get("last_active").isoformat() if event_info.get("last_active") else None,
                 "created_at": user.created_at.strftime("%Y-%m-%d %H:%M:%S") if user.created_at else "",
                 "updated_at": user.updated_at.strftime("%Y-%m-%d %H:%M:%S") if user.updated_at else ""
             })
@@ -110,6 +192,7 @@ async def get_user_list(
             "total": total,
             "page": page,
             "page_size": page_size,
+            "keyword": kw,
             "list": user_list
         })
     except HTTPException as e:
@@ -244,6 +327,15 @@ async def update_user_info(
             user.nickname = update_data["nickname"]
         if "avatar" in update_data:
             user.avatar = update_data["avatar"]
+        if "wechat_app_id" in update_data:
+            user.wechat_app_id = str(update_data.get("wechat_app_id") or "").strip()
+        if "wechat_app_secret" in update_data:
+            secret_value = str(update_data.get("wechat_app_secret") or "").strip()
+            clear_secret = bool(update_data.get("clear_wechat_app_secret"))
+            if secret_value:
+                user.wechat_app_secret = secret_value
+            elif clear_secret:
+                user.wechat_app_secret = ""
         if "role" in update_data and current_user["role"] == "admin":
             user.role = update_data["role"]
 
@@ -275,6 +367,8 @@ async def update_user_info(
 
         user.updated_at = datetime.now()
         session.commit()
+        from core.auth import clear_user_cache
+        clear_user_cache(target_username)
         return success_response(message="更新成功")
     except HTTPException as e:
         raise e
@@ -370,6 +464,194 @@ async def reset_user_plan_usage(
             "plan_expires_at": plan["plan_expires_at"].isoformat() if plan.get("plan_expires_at") else None,
         },
     }, message="已重置用户配额消耗")
+
+
+@router.get("/{username}/admin-detail", summary="管理员查看用户详情（含授权信息）")
+async def get_user_admin_detail(
+    username: str,
+    mask_sensitive: bool = Query(False, description="是否对 token/cookie 脱敏"),
+    current_user: dict = Depends(get_current_user),
+):
+    _require_admin(current_user)
+    session = DB.get_session()
+    try:
+        user = session.query(DBUser).filter(DBUser.username == username).first()
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+
+        from core.models.feed import Feed
+        from core.models.article import Article
+        from core.models.message_task import MessageTask
+        from core.models.analytics_event import AnalyticsEvent
+
+        plan = get_user_plan_summary(user)
+        auth_item = get_wechat_auth(session, owner_id=username)
+        auth_data = serialize_wechat_auth(auth_item, mask=mask_sensitive)
+        auth_data["fingerprint"] = str(getattr(auth_item, "fingerprint", "") or "")
+        raw_payload = {}
+        raw_text = str(getattr(auth_item, "raw_json", "") or "").strip()
+        if raw_text:
+            try:
+                raw_payload = json.loads(raw_text)
+            except Exception:
+                raw_payload = {"raw": raw_text[:1200]}
+        auth_data["raw_payload"] = raw_payload
+
+        feed_rows = (
+            session.query(Feed)
+            .filter(Feed.owner_id == username)
+            .order_by(Feed.created_at.desc())
+            .limit(200)
+            .all()
+        )
+        subscriptions = [
+            {
+                "id": item.id,
+                "mp_name": item.mp_name or "",
+                "faker_id": item.faker_id or "",
+                "status": int(item.status or 0),
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+                "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+            }
+            for item in feed_rows
+        ]
+
+        article_count = int(
+            session.query(func.count(Article.id))
+            .filter(Article.owner_id == username)
+            .scalar()
+            or 0
+        )
+        mp_count = int(
+            session.query(func.count(Feed.id))
+            .filter(Feed.owner_id == username)
+            .scalar()
+            or 0
+        )
+        task_count = int(
+            session.query(func.count(MessageTask.id))
+            .filter(MessageTask.owner_id == username)
+            .scalar()
+            or 0
+        )
+        event_stats = (
+            session.query(
+                func.count(AnalyticsEvent.id).label("event_count"),
+                func.max(AnalyticsEvent.created_at).label("last_active"),
+            )
+            .filter(AnalyticsEvent.username == username)
+            .first()
+        )
+        event_count = int(getattr(event_stats, "event_count", 0) or 0)
+        last_active = getattr(event_stats, "last_active", None)
+
+        return success_response({
+            "user": {
+                "username": user.username,
+                "phone": user.phone or "",
+                "nickname": user.nickname if user.nickname else user.username,
+                "email": user.email if user.email else "",
+                "avatar": user.avatar if user.avatar else "/static/default-avatar.png",
+                "wechat_app_id": str(getattr(user, "wechat_app_id", "") or ""),
+                "wechat_app_secret_set": bool(str(getattr(user, "wechat_app_secret", "") or "").strip()),
+                "role": user.role,
+                "is_active": bool(user.is_active),
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+                "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+            },
+            "plan": {
+                **plan,
+                "quota_reset_at": plan["quota_reset_at"].isoformat() if plan.get("quota_reset_at") else None,
+                "plan_expires_at": plan["plan_expires_at"].isoformat() if plan.get("plan_expires_at") else None,
+            },
+            "usage": {
+                "mp_count": mp_count,
+                "article_count": article_count,
+                "task_count": task_count,
+                "event_count": event_count,
+                "last_active": last_active.isoformat() if last_active else None,
+            },
+            "wechat_auth": auth_data,
+            "subscriptions": subscriptions,
+        })
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+@router.delete("/{username}", summary="管理员删除用户")
+async def delete_user(
+    username: str,
+    current_user: dict = Depends(get_current_user),
+):
+    _require_admin(current_user)
+    if str(current_user.get("username") or "").strip() == str(username or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_response(code=40011, message="不允许删除当前登录管理员账号"),
+        )
+
+    session = DB.get_session()
+    try:
+        target = session.query(DBUser).filter(DBUser.username == username).first()
+        if not target:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=error_response(code=40401, message="用户不存在"),
+            )
+
+        from core.models.feed import Feed
+        from core.models.article import Article
+        from core.models.wechat_auth import WechatAuth
+        from core.models.message_task import MessageTask
+        from core.models.message_task_log import MessageTask as MessageTaskLog
+        from core.models.tags import Tags
+        from core.models.analytics_event import AnalyticsEvent
+        from core.models.ai_profile import AIProfile
+        from core.models.ai_publish_task import AIPublishTask
+        from core.models.billing_order import BillingOrder
+
+        deleted = {
+            "articles": session.query(Article).filter(Article.owner_id == username).delete(synchronize_session=False),
+            "feeds": session.query(Feed).filter(Feed.owner_id == username).delete(synchronize_session=False),
+            "wechat_auths": session.query(WechatAuth).filter(WechatAuth.owner_id == username).delete(synchronize_session=False),
+            "message_tasks": session.query(MessageTask).filter(MessageTask.owner_id == username).delete(synchronize_session=False),
+            "message_task_logs": session.query(MessageTaskLog).filter(MessageTaskLog.owner_id == username).delete(synchronize_session=False),
+            "tags": session.query(Tags).filter(Tags.owner_id == username).delete(synchronize_session=False),
+            "analytics_events": session.query(AnalyticsEvent).filter(AnalyticsEvent.owner_id == username).delete(synchronize_session=False),
+            "analytics_events_by_username": session.query(AnalyticsEvent).filter(AnalyticsEvent.username == username).delete(synchronize_session=False),
+            "ai_profiles": session.query(AIProfile).filter(AIProfile.owner_id == username).delete(synchronize_session=False),
+            "ai_publish_tasks": session.query(AIPublishTask).filter(AIPublishTask.owner_id == username).delete(synchronize_session=False),
+            "billing_orders": session.query(BillingOrder).filter(BillingOrder.owner_id == username).delete(synchronize_session=False),
+        }
+        session.delete(target)
+        session.commit()
+
+        try:
+            from core.auth import clear_user_cache
+            clear_user_cache(username)
+        except Exception:
+            pass
+
+        return success_response({
+            "username": username,
+            "deleted": deleted,
+        }, message="用户及关联数据已删除")
+    except HTTPException:
+        raise
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_response(code=50003, message=f"删除用户失败: {e}"),
+        )
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
    
 
 @router.put("/password", summary="修改密码")

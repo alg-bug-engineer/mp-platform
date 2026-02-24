@@ -60,13 +60,13 @@ def _order_to_dict(order: BillingOrder) -> Dict:
 
 
 def _channel_pay_hint(order: BillingOrder) -> Dict:
-    if (order.channel or "").lower() == "mock":
+    if (order.channel or "").lower() in {"mock", "sandbox"}:
         return {
-            "type": "mock",
-            "message": "测试支付通道，请调用确认支付接口完成支付。",
-            "mock_token": f"mockpay://{order.order_no}",
+            "type": "sandbox",
+            "message": "支付链路已就绪，请完成支付确认后生效套餐。",
+            "sandbox_token": f"sandboxpay://{order.order_no}",
         }
-    return {"type": "manual", "message": "当前通道仅支持线下确认。"}
+    return {"type": "manual", "message": "请通过运营人员确认该订单支付状态。"}
 
 
 def create_order(
@@ -74,7 +74,7 @@ def create_order(
     owner_id: str,
     plan_tier: str,
     months: int = 1,
-    channel: str = "mock",
+    channel: str = "sandbox",
     note: str = "",
 ) -> BillingOrder:
     tier = normalize_plan_tier(plan_tier)
@@ -91,7 +91,7 @@ def create_order(
         months=m,
         amount_cents=amount_cents,
         currency="CNY",
-        channel=(channel or "mock").strip().lower(),
+        channel=(channel or "sandbox").strip().lower(),
         status=ORDER_STATUS_PENDING,
         note=(note or "").strip()[:500],
         created_at=now,

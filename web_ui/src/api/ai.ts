@@ -84,6 +84,29 @@ export interface AIComposeResult {
   }
 }
 
+export type ComposeTaskStatus = 'pending' | 'processing' | 'success' | 'failed'
+
+export interface ComposeTask {
+  id: string
+  owner_id: string
+  article_id: string
+  mode: 'analyze' | 'create' | 'rewrite'
+  status: ComposeTaskStatus
+  status_message?: string
+  error_message?: string
+  request_payload?: AIComposePayload
+  result_payload?: AIComposeResult
+  created_at?: string | null
+  updated_at?: string | null
+  started_at?: string | null
+  finished_at?: string | null
+}
+
+export interface ComposeTaskSubmitResult {
+  task: ComposeTask
+  queued_total: number
+}
+
 export interface PlanSummary {
   tier: string
   label: string
@@ -146,6 +169,7 @@ export interface DraftRecord {
   platform: string
   mode: string
   created_at: string
+  updated_at?: string
   metadata?: Record<string, any>
 }
 
@@ -158,6 +182,7 @@ export interface WorkbenchOverview {
     unread_count: number
     local_draft_count: number
     pending_publish_count: number
+    pending_compose_count?: number
     daily_ai_limit?: number
     daily_ai_used?: number
     daily_ai_remaining?: number
@@ -224,15 +249,26 @@ export const recommendTags = (items: Array<{ article_id: string; title: string }
 }
 
 export const aiAnalyze = (articleId: string, payload: AIComposePayload = {}) => {
-  return http.post<AIComposeResult>(`/wx/ai/articles/${articleId}/analyze`, payload, composeRequestConfig())
+  return http.post<ComposeTaskSubmitResult>(`/wx/ai/articles/${articleId}/analyze`, payload, composeRequestConfig())
 }
 
 export const aiCreate = (articleId: string, payload: AIComposePayload = {}) => {
-  return http.post<AIComposeResult>(`/wx/ai/articles/${articleId}/create`, payload, composeRequestConfig())
+  return http.post<ComposeTaskSubmitResult>(`/wx/ai/articles/${articleId}/create`, payload, composeRequestConfig())
 }
 
 export const aiRewrite = (articleId: string, payload: AIComposePayload = {}) => {
-  return http.post<AIComposeResult>(`/wx/ai/articles/${articleId}/rewrite`, payload, composeRequestConfig())
+  return http.post<ComposeTaskSubmitResult>(`/wx/ai/articles/${articleId}/rewrite`, payload, composeRequestConfig())
+}
+
+export const getComposeTasks = (params?: { status?: string; limit?: number }) => {
+  const query = new URLSearchParams()
+  if (params?.status) query.set('status', params.status)
+  query.set('limit', String(params?.limit || 30))
+  return http.get<ComposeTask[]>(`/wx/ai/compose/tasks?${query.toString()}`)
+}
+
+export const getComposeTask = (taskId: string) => {
+  return http.get<ComposeTask>(`/wx/ai/compose/tasks/${taskId}`)
 }
 
 export interface InlineIllustrationPayload {
@@ -297,6 +333,12 @@ export const deleteDraft = (draftId: string) => {
   return http.delete<{ id: string; deleted: boolean }>(`/wx/ai/drafts/${draftId}`)
 }
 
+export const deleteDraftBatch = (draftIds: string[]) => {
+  return http.post<{ deleted: number; requested: number }>(`/wx/ai/drafts/batch-delete`, {
+    ids: draftIds,
+  })
+}
+
 export interface DraftSyncPayload {
   title?: string
   content?: string
@@ -320,6 +362,7 @@ export const syncDraftToWechat = (draftId: string, payload: DraftSyncPayload) =>
       queued?: number
     }
     queued_task?: PublishTask
+    draft?: DraftRecord
   }>(`/wx/ai/drafts/${draftId}/sync`, payload)
 }
 

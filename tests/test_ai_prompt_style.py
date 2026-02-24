@@ -1,10 +1,10 @@
 import unittest
 
-from core.ai_service import build_prompt, ensure_markdown_content
+from core.ai_service import build_prompt
 
 
 class AIPromptStyleTestCase(unittest.TestCase):
-    def test_create_prompt_should_enforce_paragraph_first_rules(self):
+    def test_create_prompt_should_use_new_story_architect_template(self):
         system, user = build_prompt(
             mode="create",
             title="测试标题",
@@ -18,11 +18,11 @@ class AIPromptStyleTestCase(unittest.TestCase):
             },
         )
         self.assertTrue(system)
-        self.assertIn("正文以自然段叙述为主", user)
-        self.assertIn("最多使用 2 个二级标题", user)
-        self.assertIn("仅允许 1 处且最多 3 条", user)
+        self.assertIn("科技叙事架构师与热点解读者", user)
+        self.assertIn("Initialization Workflow", user)
+        self.assertIn("Adaptive Structure Templates", user)
 
-    def test_rewrite_prompt_should_request_full_paragraph_draft(self):
+    def test_rewrite_prompt_should_use_style_reconstruction_template(self):
         _, user = build_prompt(
             mode="rewrite",
             title="测试标题",
@@ -34,18 +34,9 @@ class AIPromptStyleTestCase(unittest.TestCase):
                 "length": "medium",
             },
         )
-        self.assertIn("完整改写成稿", user)
-        self.assertIn("正文以段落推进", user)
-
-    def test_ensure_markdown_should_wrap_plain_text(self):
-        out = ensure_markdown_content(
-            mode="create",
-            title="测试标题",
-            text="这是一段纯文本内容，没有标题也没有列表。",
-        )
-        self.assertIn("# 测试标题", out)
-        self.assertRegex(out, r"(?m)^## ")
-        self.assertRegex(out, r"(?m)^- \*\*要点")
+        self.assertIn("Phase 3: 内容重构", user)
+        self.assertIn("Output Format (输出格式)", user)
+        self.assertIn("目标媒体/参考文章", user)
 
 
 if __name__ == "__main__":

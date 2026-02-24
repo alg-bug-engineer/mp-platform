@@ -30,6 +30,7 @@ import os
 import time
 from core.config import cfg,VERSION,API_BASE
 from core.db import DB
+from core.ai_compose_queue_service import start_compose_queue_workers
 from core.analytics_service import (
     analytics_enabled,
     build_api_event,
@@ -173,6 +174,7 @@ app.include_router(views_router)
 async def ensure_tables():
     try:
         DB.create_tables()
+        start_compose_queue_workers()
     except Exception:
         pass
 

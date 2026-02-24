@@ -44,6 +44,29 @@ class AIActivityMetricsTestCase(unittest.TestCase):
         self.assertIsNone(data["publish_success_rate_7d"])
         self.assertEqual(len(data["trend"]), 7)
 
+    def test_direct_sync_delivery_should_count(self):
+        now = datetime(2026, 2, 18, 12, 0, 0)
+        drafts = [
+            {
+                "created_at": (now - timedelta(days=1)).isoformat(),
+                "metadata": {
+                    "delivery": {
+                        "wechat": {
+                            "status": "success",
+                            "delivered_at": (now - timedelta(days=1, hours=1)).isoformat(),
+                            "source": "draft_sync_action",
+                        }
+                    }
+                },
+            }
+        ]
+        data = summarize_activity_metrics(drafts=drafts, publish_tasks=[], days=7, now=now)
+        self.assertEqual(data["draft_count_7d"], 1)
+        self.assertEqual(data["publish_total_7d"], 1)
+        self.assertEqual(data["publish_success_7d"], 1)
+        self.assertEqual(data["publish_failed_7d"], 0)
+        self.assertEqual(data["publish_success_rate_7d"], 100.0)
+
 
 if __name__ == "__main__":
     unittest.main()

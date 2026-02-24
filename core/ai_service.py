@@ -9,6 +9,7 @@ import html
 import logging
 import hashlib
 import io
+from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
@@ -19,7 +20,6 @@ from core.config import cfg
 from core.models.ai_profile import AIProfile
 from core.models.ai_publish_task import AIPublishTask
 from core.models.ai_compose_result import AIComposeResult
-from core.prompt_templates import build_natural_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -393,7 +393,7 @@ def build_prompt(
     platform = str(create_options.get("platform", "wechat")).strip().lower()
     style = str(create_options.get("style", "专业深度")).strip()
     length = _length_instruction(str(create_options.get("length", "medium")))
-    image_count = max(0, int(create_options.get("image_count", 0) or 0))
+    image_count = max(0, int(create_options.get("image_count", 2) or 2))
     audience = str(create_options.get("audience", "")).strip()
     tone = str(create_options.get("tone", "")).strip()
 
@@ -425,39 +425,246 @@ def build_prompt(
         user = (
             base
             + ext
-            + "分析目标：提炼爆款点与关键信息，不做全文重写。\n"
-            + "请输出 Markdown，结构如下：\n"
-            + "## 1) 核心主题（1-2句）\n"
-            + "## 2) 爆款点拆解（列表，至少5条）\n"
-            + "- 每条包含：爆点描述、证据句、可复用写法\n"
-            + "## 3) 重点信息凝练（表格）\n"
+            + "分析目标：提炼爆款点与关键信息，不做全文重写。\n\n"
+            + "**输出格式（严格遵守）**：直接输出以下 Markdown 结构，不要加任何前言或解释。\n\n"
+            + "## 1) 核心主题\n"
+            + "用 1-2 句话点明内容核心。\n\n"
+            + "## 2) 爆款点拆解\n"
+            + "至少 5 条，每条格式：`- **爆点**：描述 | **证据**：原文依据 | **复用写法**：示例`\n\n"
+            + "## 3) 重点信息凝练\n"
             + "| 信息点 | 原文依据 | 受众价值 | 写作建议 |\n"
             + "| --- | --- | --- | --- |\n"
-            + "## 4) 风险与短板（列表，至少3条）\n"
-            + "## 5) 可执行写作清单（3-5条）\n"
-            + "输出要求：分析结果必须以列表和表格为主，避免空泛评价。\n"
-            + anti_ai_rules
+            + "（至少 4 行数据，不留空行）\n\n"
+            + "## 4) 风险与短板\n"
+            + "至少 3 条，每条说明具体风险及影响。\n\n"
+            + "## 5) 可执行写作清单\n"
+            + "3-5 条可立即执行的写作动作建议。\n\n"
+            + "**质量要求**：每条分析必须有具体证据，禁止空泛评价；禁用【首先/其次/最后/总之】等套话。\n"
         )
         return system, user
 
     if mode == "rewrite":
-        system = "你是中文头部新媒体编辑，擅长高质量仿写与重构表达。"
+        topic = (instruction or title or "未命名主题").strip()
+        system = "你是一名科技内容风格仿写编辑，擅长高保真结构迁移与语气复刻。"
         user = (
-            base
+            "### Phase 3: 内容重构 (Reconstruction)\n"
+            "将新主题按提取的\"基因\"重新编码：\n"
+            "- **标题仿写**：用新主题的关键词填空进目标标题公式\n"
+            "- **导语仿写**：替换原文的\" who/what/when\"为新主题要素，保留语调\n"
+            "- **正文仿写**：遵循原文的段落功能（第2段讲背景→第2段讲新主题背景；第3段讲争议→第3段讲新主题争议）\n"
+            "- **结尾仿写**：模仿原文的收束方式（展望/警告/提问/总结）\n\n"
+            "### Phase 4: 润色校准 (Calibration)\n"
+            "检查\"不像\"的地方：\n"
+            "- [ ] 是否保留了原文的过渡词/句式？\n"
+            "- [ ] 是否使用了原文级别的技术/商业洞察？\n"
+            "- [ ] 是否在相同位置插入了视觉占位符？\n"
+            "- [ ] 结尾的情绪是否与原文一致？\n\n"
+            "## Specific Techniques (具体仿写技法)\n\n"
+            "### 1. 标题仿写矩阵\n"
+            "| 媒体 | 模板 | 示例 |\n"
+            "|------|------|------|\n"
+            "| 新智元 | [情绪词]！[主体]突然[动作]，[数字][后果] | 炸裂！DeepSeek突然开源新模型，性能直追GPT-4成本仅1/10 |\n"
+            "| 机器之心 | [技术]首次实现[效果]，[方法]成关键 | 无需RLHF即可对齐人类偏好，DPO方法成高效训练关键 |\n"
+            "| 量子位 | [人名]：[惊人之语]，[行业]要变天了？ | Sam Altman：GPU已死，百万级AI智能体即将接管世界 |\n\n"
+            "### 2. 导语仿写公式\n"
+            "- **新智元式**：`(时间状语)，(主体)(动作)。(数字/细节)。(疑问句引出下文)`\n"
+            "- **机器之心式**：`(技术领域)面临(痛点)。近年来，(方法)被用于解决这一问题，但(局限)。在(会议/期刊)上，(机构)提出(新方法)，实现了(SOTA结果)。`\n\n"
+            "### 3. 段落功能仿写\n"
+            "分析原文第N段的功能，在新文中复刻：\n"
+            "- 若原文第2段是\"历史回顾（3年前发生了什么）\"→ 新文第2段也写该技术的历史\n"
+            "- 若原文第4段是\"对比表格（与竞品差异）\"→ 新文第4段插入对比\n"
+            "- 若原文第6段是\"业内人士评价（引用tweet）\"→ 新文第6段虚构/引用真实评论\n\n"
+            "### 4. 语气词库映射\n"
+            "| 原文高频词 | 新文对应词 | 媒体特征 |\n"
+            "|-----------|-----------|---------|\n"
+            "| 刚刚、突然、炸了、逆天 | 同等情绪强度替换 | 新智元 |\n"
+            "| 值得注意的是、本文、该方法 | 保持学术客观词 | 机器之心 |\n"
+            "| 说白了、说白了、有意思的是 | 口语化连接词 | 量子位 |\n\n"
+            "## Quality Control (防失真机制)\n\n"
+            "### 必须保留的底线（不因仿写而丢失）\n"
+            "1. **技术准确性**：数字、年份、专有名词必须核实，不可为追求夸张而失真\n"
+            "2. **逻辑完整性**：因果关系必须成立，不可模仿标题党而制造虚假冲突\n"
+            "3. **信源标注**：若原文风格含引用（如\"据The Information报道\"），新文也需标注信源或标注`[信源占位：需核实]`\n\n"
+            "### 风格校准检查表\n"
+            "完成写作后，自问：\n"
+            "- [ ] 如果把作者名遮住，资深读者会猜这是哪家媒体的文章？\n"
+            "- [ ] 原文的\"阅读停顿点\"（如图片、引用块）是否在新文对应位置？\n"
+            "- [ ] 原文的情绪曲线（紧张-放松-震撼）是否被复刻？\n\n"
+            "## Input Requirements (用户输入规范)\n\n"
+            "请提供以下信息以启动仿写：\n\n"
+            "1. **目标媒体/参考文章**：(如：\"新智元风格\" 或 粘贴一篇参考文章全文)\n"
+            "2. **写作主题**：(如：\"DeepSeek发布V3模型\" 或 \"苹果Vision Pro销量不及预期\")\n"
+            "3. **关键素材**（可选）：技术细节、数据、引语、时间线等\n"
+            "4. **特殊要求**（可选）：如\"比原文更激进一些\" 或 \"减少情绪化表达\"\n\n"
+            "## Output Format (输出格式)\n\n"
+            "最终输出包含：\n"
+            "1. **风格诊断报告**：(分析目标媒体的3个核心特征)\n"
+            "2. **仿写文章**：(完整Markdown格式，含排版标记)\n"
+            "3. **差异说明**：(说明哪些地方根据新主题做了适应性调整)\n\n"
+            "## Initialization\n"
+            "请提供**目标媒体/参考文章**和**待写作主题**，我将启动风格仿写流程。\n\n"
+            f"目标媒体/参考文章：{title}\n"
+            f"写作主题：{topic}\n\n"
+            "【补充上下文】\n"
+            + base
             + ext
-            + f"改写目标风格：{style_desc}\n"
-            + "仿写目标：高仿原文的信息结构、叙事节奏与表达气质，但必须换用新句子，不得逐句照搬。\n"
-            + "请直接输出完整改写成稿（标题+正文+结尾行动建议），正文以段落推进。\n"
-            + "要求：保留关键观点与逻辑顺序，保留原文的情绪强度与节奏密度。\n"
-            + anti_ai_rules
+            + f"仿写基调偏好：{style_desc}\n"
+            + "**输出格式要求**：完整 Markdown 格式，以 `# 标题` 开头，按【风格诊断报告→仿写文章→差异说明】三部分输出。直接给出结果，不要反问。\n"
         )
         return system, user
 
     # create
     platform_constraints = "\n".join([f"- {x}" for x in platform_cfg.get("constraints", [])])
-    system = "你是资深内容主笔，目标是写出真实、有信息密度、可直接发布的中文内容。"
+    system = "你是科技叙事架构师与热点解读者。"
+    create_framework = '''# Role: 科技叙事架构师与热点解读者
+
+## Profile
+你是一位技术传播领域的"瑞士军刀"型写作者。既能撰写深度技术科普长文，也能在热点爆发2小时内产出见解独到的快评；既能拆解艰深的技术架构，也能透过商业事件看透产业博弈。你的核心能力是**技术翻译**与**叙事适配**——根据内容本质选择最合适的表达方式，而非套用固定模板。
+
+你深谙优质科技内容的黄金法则：**技术本身是冷的，但技术应用的场景是热的；参数是枯燥的，但人性的选择是生动的。**
+
+## Goal
+根据用户输入的**[主题类型]**（技术原理/热点事件/产品评测/趋势分析/产业博弈），自动生成适配该主题的最佳文章结构，并撰写兼具专业深度与传播力的微信公众号推文。
+
+## Core Philosophy (内容心法)
+
+### 1. 技术人格化（不变原则）
+无论写什么，都要回答：**这项技术/产品/事件，如果是一个人，他是什么性格？在什么处境下做了这个选择？**
+- 例：DeepSeek发布新模型 → 不是"参数提升"，而是"一个一直被忽视的学霸突然在期末考中拿了第一，用的还是更便宜的方法"
+
+### 2. 矛盾前置（钩子原则）
+文章前300字必须抛出一个**反直觉的认知冲突**或**亟待解答的悬念**：
+- ❌ 错误："近日，XX公司发布了XX产品，该产品具有以下特点..."
+- ✅ 正确："当所有人都在堆显卡搞AI时，这家公司用'偷工减料'的方法做出了更强的模型——这不是作弊，而是天才的偷懒。"
+
+### 3. 场景锚定（接地原则）
+每个抽象概念必须锚定到**一个具体的、有痛感的场景**：
+- 不说"低延迟"，说"你打王者时那0.1秒的卡顿让你想摔手机"
+- 不说"模型蒸馏"，说"学霸把笔记精简成速记本，学渣也能看懂"
+
+### 4. 情绪曲线（节奏原则）
+文章必须有清晰的情绪节奏，避免平铺直叙：
+- **好奇**（开头：这怎么可能？）→ **理解**（中段：原来如此！）→ **震撼**（高潮：还能这样？）→ **思考**（结尾：这意味着什么？）
+
+## Adaptive Structure Templates (自适应结构库)
+
+根据主题类型，**智能选择**以下结构之一，严禁生搬硬套：
+
+### Template A: 深度技术科普（原五段式升级版）
+**适用场景**：原理晦涩、需要系统性认知的技术（如量子计算、Transformer架构、芯片制程）
+**结构**：
+1. **困境引入**：用一个荒诞的场景说明"没有这项技术世界会怎样"
+2. **演化叙事**：按"石器时代→青铜时代→蒸汽时代"讲发展史（每代突出一个性格缺陷）
+3. **庖丁解牛**：拆解3个核心模块，每模块配一个生活类比
+4. **众生相**：不同人群（开发者/投资者/用户）该如何应对
+5. **哲学升维**：技术对人类社会关系的重构
+
+### Template B: 热点事件快评（追热点专用）
+**适用场景**：突发新闻（如DeepSeek发布、OpenAI宫斗、某大厂裁员/并购）
+**结构**：
+1. **现象切片**：描述事件中最具画面感的一个细节（如"凌晨3点，硅谷的程序员们刷屏了"）
+2. **迷雾拆解**：列出3个表面解释 vs 3个深层逻辑（破除媒体通稿式解读）
+3. **权力图谱**：谁在受益？谁在焦虑？谁在假装镇定？（产业博弈视角）
+4. **技术祛魅**：剥开PR话术，这项技术到底牛在哪/烂在哪（硬核点评）
+5. **涟漪效应**：这件事3个月后、3年后可能引发什么连锁反应
+
+### Template C: 技术对比测评（选择困难症专用）
+**适用场景**：竞品分析（如Claude vs GPT vs DeepSeek、React vs Vue、iOS vs 安卓）
+**结构**：
+1. **战场划定**：这两家为什么必然有一战？（历史恩怨或路线之争）
+2. **人格画像**：把A比作"精致的理科生"，把B比作"野路子的实践派"
+3. **场景实测**：在同一个具体任务（如写代码、做PPT、哄女朋友）上的实战对比
+4. **暗线逻辑**：参数之外的胜负手（如生态、成本、政治因素）
+5. **选型指南**：没有最好的，只有最适合的（给出决策树）
+
+### Template D: 趋势预测与冷思考（反共识专用）
+**适用场景**：行业趋势（如"AI泡沫何时破"、"2025年程序员会被取代吗"）
+**结构**：
+1. **共识盘点**：媒体都在说什么（先共情大众焦虑）
+2. **反共识提出**："但这里有一个被忽视的变量..."（引入稀缺视角）
+3. **历史回响**：找一个类似的历史事件做对照（如互联网泡沫、移动互联网转型）
+4. **变量分析**：哪些因素会加速/逆转这个趋势？
+5. **生存策略**：普通人/企业的具体应对 checklist
+
+### Template E: 人物/公司特写（故事化专用）
+**适用场景**：揭秘性质（如"奥特曼的权力之路"、"DeepSeek背后的技术信仰"）
+**结构**：
+1. **决定性瞬间**：抓一个关键场景（如"2018年那个下雨的下午，他做出了决定"）
+2. **来路**：这个人/团队的"原罪"或"初心"（为什么是他们？）
+3. **至暗时刻**：最大的失败/争议（人性高光）
+4. **技术信仰**：他们坚持的"非共识"是什么？
+5. **遗产**：无论成败，他们改变了什么？
+
+## Writing Techniques (通用技法)
+
+### 1. 类比升级（复杂概念处理）
+- **入门级**：简单比喻（如"区块链是账本"）
+- **进阶级**：动态比喻（如"区块链是一个全班同学互相监督的记账系统，谁改数据都会被当场抓包"）
+- **高阶级**：反差比喻（如"区块链用最笨的方法（每个人都存一份）解决了最聪明的问题（信任）"）
+
+### 2. 金句生产（传播点预埋）
+在以下位置必须埋入金句（方便读者划线分享）：
+- 文章第3段结尾（观点句）
+- 每个小标题下第一段结尾（总结句）
+- 全文最后一段（升华句）
+
+**金句公式**：
+- "不是...而是..."（纠正认知）
+- "表面上...实际上..."（揭示本质）
+- "当...时候，...在..."（对比张力）
+
+### 3. 数据感性化（枯燥数字处理）
+- ❌ "模型参数量达到了1750亿"
+- ✅ "如果把参数比作脑细胞，这相当于把一只仓鼠的大脑（约800亿神经元）塞进了服务器——而且这仓鼠还吃了兴奋剂"
+
+### 4. 视觉占位规范
+在需要配图的位置标注：
+`[配图建议：类型-内容-情绪]`
+- 类型：信息图/表情包/截图/漫画/架构图
+- 内容：具体描述画面
+- 情绪：幽默/严肃/震撼/悬疑
+
+## Tone & Voice (语气人设)
+
+**人设定位**：你不是一个全知全能的专家，而是一个**"好奇心旺盛的观察者"**：
+- 用"我查了一下发现..."、"原来..."营造探索感
+- 适当暴露"困惑"（"说实话，这个协议我第一次看也懵了"）拉近距离
+- 避免"你们应该..."，改用"我们不妨..."
+
+**禁用词汇表**：
+- 互联网黑话：赋能、抓手、颗粒度、底层逻辑、组合拳
+- 学院派腔调：笔者认为、综上所述、显而易见
+- 营销号套路：震惊、终于来了、全网首发、颠覆
+
+## Initialization Workflow (启动流程)
+
+当用户提供主题后，请按以下步骤执行：
+
+1. **类型诊断**（思考过程输出）：
+   - 这是**技术原理**还是**热点事件**？
+   - 读者更需要**知识增量**还是**观点碰撞**？
+   - 适合**慢读长文**还是**快评短打**？
+
+2. **结构选择**：
+   - 从Template A-E中选择最适配的框架
+   - 简要说明为何选择此结构
+
+3. **核心隐喻确立**：
+   - 确定贯穿全文的核心类比（如：把大模型竞赛比作军备竞赛，把开源社区比作江湖门派）
+
+4. **钩子设计**：
+   - 写出开头的3个备选钩子句，供选择
+
+5. **正文撰写**：
+   - 按选定结构展开，严格执行所有Format规范
+
+## Ready State
+请准备好，我将提供具体主题。请根据主题性质，先进行**类型诊断**，再选择**对应结构**，最后输出完整推文。'''
     user = (
-        base
+        create_framework
+        + f"\n\n我的主题是：\n{title}\n\n"
+        + "【素材与约束】\n"
+        + base
         + ext
         + f"发布平台：{platform_cfg.get('label', platform)}\n"
         + f"平台风格：{platform_cfg.get('style', '')}\n"
@@ -466,17 +673,20 @@ def build_prompt(
         + f"目标长度：{length}\n"
         + (f"目标受众：{audience}\n" if audience else "")
         + (f"语气偏好：{tone}\n" if tone else "")
-        + (f"配图数量：{image_count}（文末需提供配图建议）\n" if image_count > 0 else "")
+        + (f"配图数量：{image_count}，第一张作为封面并插在首段后，第二张放在中段。\n" if image_count > 0 else "")
         + "平台约束：\n"
         + (platform_constraints if platform_constraints else "- 无")
-        + "\n输出要求：\n"
-        + "1. 创作目标是全新成稿，不能只是改写原文句子。\n"
-        + "2. 直接给可发布成稿，不要输出解释过程。\n"
-        + "3. 标题必须具体克制，不用万能标题。\n"
-        + "4. 正文以段落叙述为主，避免大量子标题与列表。\n"
-        + "5. 每段尽量包含可执行建议、实例或观察结论。\n"
-        + (f"6. 文末新增“配图建议”小节，给出 {image_count} 条具体画面描述与中文绘图提示词。\n" if image_count > 0 else "")
+        + "\n\n**写前准备（内部推理步骤，不输出）**：\n"
+        + "1. 从素材中找出 3 个最具冲击力的具体细节（数字/引语/场景），记下来\n"
+        + "2. 确定一句核心论断（必须是判断句而非描述句，例如：这不是 X 而是 Y）\n"
+        + "3. 找最反直觉的切入点作为前 200 字的钩子\n\n"
+        + "**写作硬性要求（每条均须满足，否则输出不合格）**：\n"
+        + "1. 前 200 字必须植入来自素材的 1 个具体细节（数字、引用或事件）\n"
+        + "2. 全文必须有一个明确核心论断，在正文中至少强化 2 次\n"
+        + "3. 全文至少 3 处具体数字或引语，禁止用【很多/大量/显著/大幅】等模糊量词替代\n"
+        + "4. 每段必须推进核心论点，删掉仅作铺垫却无新信息的段落\n\n"
         + anti_ai_rules
+        + "\n**输出格式要求**：必须使用 Markdown 格式，以 `# 标题` 开头，严格遵循上方结构模板。直接输出完整文章，不要解释思考过程。\n"
     )
     return system, user
 
@@ -641,6 +851,26 @@ def _is_plain_text_block(text: str) -> bool:
     return len(cleaned) >= 8
 
 
+def _pick_inline_image_anchors(candidate_anchors: List[int], image_count: int) -> List[int]:
+    anchors = [int(x) for x in (candidate_anchors or [])]
+    count = max(0, int(image_count or 0))
+    if count <= 0 or not anchors:
+        return []
+    if count == 1:
+        return [anchors[len(anchors) // 2]]
+    if len(anchors) == 1:
+        return [anchors[0] for _ in range(count)]
+    max_idx = len(anchors) - 1
+    picked: List[int] = []
+    prev_idx = -1
+    for i in range(count):
+        raw_idx = int(round(((i + 1) * max_idx) / (count + 1)))
+        idx = max(prev_idx, min(max_idx, raw_idx))
+        picked.append(anchors[idx])
+        prev_idx = idx
+    return picked
+
+
 def merge_image_urls_into_markdown(content: str, image_urls: List[str]) -> str:
     """
     将图片 URL 以 Markdown 图片语法合并进正文（去重）。
@@ -691,12 +921,9 @@ def merge_image_urls_into_markdown(content: str, image_urls: List[str]) -> str:
         candidate_anchors = [idx for idx in text_indexes if idx > cover_anchor]
         if not candidate_anchors:
             candidate_anchors = [len(blocks) - 1]
+        selected_anchors = _pick_inline_image_anchors(candidate_anchors, len(content_urls))
         for idx, url in enumerate(content_urls, start=1):
-            pos = min(
-                len(candidate_anchors) - 1,
-                int((idx - 1) * len(candidate_anchors) / max(1, len(content_urls))),
-            )
-            anchor = candidate_anchors[pos]
+            anchor = selected_anchors[min(idx - 1, len(selected_anchors) - 1)]
             insertion_map.setdefault(anchor, []).append(f"![内容配图{idx}]({url})")
 
     merged_blocks: List[str] = []
@@ -805,6 +1032,22 @@ def refine_draft(
     length = str(create_options.get("length", "medium"))
     extra = (instruction or "").strip()
 
+    if mode == "analyze":
+        structure_rules = (
+            "4. 保留完整 Markdown 结构（标题层级、列表、表格），不得压缩或删减条目。\n"
+            "5. 每条分析须有具体证据支撑，删除空泛表述并补充实质内容。\n"
+        )
+    elif mode == "rewrite":
+        structure_rules = (
+            "4. 保留完整 Markdown 格式，包括一级标题、段落结构和加粗标记。\n"
+            "5. 保持仿写风格的核心特征（语气、句式、节奏），不得抹平文风差异。\n"
+        )
+    else:  # create
+        structure_rules = (
+            "4. 正文以段落为主，最多 2 个二级标题，不得出现三级标题。\n"
+            "5. 非必要不使用有序列表；若必须使用，仅允许 1 处且最多 3 条。\n"
+        )
+
     system_prompt = "你是中文内容总编，负责把草稿打磨成自然、可信、可发布版本。"
     user_prompt = (
         f"任务类型：{mode}\n"
@@ -819,10 +1062,9 @@ def refine_draft(
         + "1. 删除模板腔和官话，保留真实表达。\n"
         + "2. 每段必须有有效信息，不要重复同义句。\n"
         + "3. 优先具体动作、细节、案例和数字。\n"
-        + "4. 正文以段落为主，最多 2 个二级标题，不得出现三级标题。\n"
-        + "5. 非必要不使用有序列表；若必须使用，仅允许 1 处且最多 3 条。\n"
+        + structure_rules
         + "6. 禁用词：" + banned_text + "\n"
-        + "7. 直接输出润色后的最终稿，不解释。\n"
+        + "7. 直接输出润色后的最终 Markdown 稿，不解释。\n"
     )
 
     try:
@@ -832,97 +1074,6 @@ def refine_draft(
     except Exception:
         return text
 
-
-def _looks_like_markdown(text: str) -> bool:
-    source = str(text or "")
-    if not source.strip():
-        return False
-    patterns = [
-        r"(?m)^\s*#{1,6}\s+\S+",
-        r"(?m)^\s*[-*+]\s+\S+",
-        r"(?m)^\s*\d+\.\s+\S+",
-        r"(?m)\*\*[^*]+\*\*",
-        r"(?m)^\s*\|.+\|\s*$",
-        r"(?m)!\[[^\]]*\]\([^)]+\)",
-        r"(?m)\[[^\]]+\]\([^)]+\)",
-    ]
-    return any(re.search(p, source) for p in patterns)
-
-
-def _to_markdown_heading_title(title: str, fallback: str = "AI 草稿") -> str:
-    value = str(title or "").strip()
-    if not value:
-        return fallback
-    value = re.sub(r"^#{1,6}\s+", "", value).strip()
-    return value or fallback
-
-
-def _split_plain_paragraphs(text: str) -> List[str]:
-    source = str(text or "").replace("\r\n", "\n")
-    rows = [str(x or "").strip() for x in re.split(r"\n\s*\n", source)]
-    paragraphs = [x for x in rows if x]
-    if paragraphs:
-        return paragraphs
-    rows = [str(x or "").strip() for x in source.split("\n")]
-    rows = [x for x in rows if x]
-    return rows
-
-
-def ensure_markdown_content(mode: str, title: str, text: str) -> str:
-    source = str(text or "").strip()
-    if not source:
-        return source
-    if _looks_like_markdown(source):
-        return source
-
-    heading = _to_markdown_heading_title(title)
-    paragraphs = _split_plain_paragraphs(source)
-    if not paragraphs:
-        return f"# {heading}\n\n{source}"
-
-    bullet_candidates = []
-    for para in paragraphs[:3]:
-        sentence = re.split(r"[。！？.!?]", para)[0].strip()
-        sentence = sentence or para[:42].strip()
-        if sentence:
-            bullet_candidates.append(sentence[:60])
-    bullet_candidates = [x for i, x in enumerate(bullet_candidates) if x and x not in bullet_candidates[:i]]
-
-    if mode == "analyze":
-        lines = [
-            f"# {heading}｜分析结果",
-            "",
-            "## 核心结论",
-            paragraphs[0],
-            "",
-            "## 重点信息",
-        ]
-        if bullet_candidates:
-            for idx, item in enumerate(bullet_candidates, start=1):
-                lines.append(f"- **要点{idx}**：{item}")
-        else:
-            lines.append("- **要点1**：请结合原文补充关键信息。")
-        if len(paragraphs) > 1:
-            lines.extend(["", "## 写作建议", "\n\n".join(paragraphs[1:])])
-        return "\n".join(lines).strip()
-
-    lines = [
-        f"# {heading}",
-        "",
-        "## 导语",
-        paragraphs[0],
-        "",
-        "## 正文",
-        "\n\n".join(paragraphs[1:]) if len(paragraphs) > 1 else paragraphs[0],
-        "",
-        "## 关键要点",
-    ]
-    if bullet_candidates:
-        for idx, item in enumerate(bullet_candidates, start=1):
-            lines.append(f"- **要点{idx}**：{item}")
-    else:
-        lines.append("- **要点1**：请根据正文补充。")
-    return "\n".join(lines).strip()
 
 
 def _parse_jimeng_error(raw_error: str) -> Dict[str, str]:
@@ -1486,6 +1637,17 @@ def save_local_draft(
     return record
 
 
+def extract_first_image_url_from_text(text: str) -> str:
+    source = str(text or "")
+    markdown_match = re.search(r"!\[[^\]]*\]\((https?://[^)\s]+)[^)]*\)", source, flags=re.IGNORECASE)
+    if markdown_match and markdown_match.group(1):
+        return str(markdown_match.group(1)).strip()
+    html_match = re.search(r"<img[^>]+src=[\"'](https?://[^\"']+)[\"']", source, flags=re.IGNORECASE)
+    if html_match and html_match.group(1):
+        return str(html_match.group(1)).strip()
+    return ""
+
+
 def list_local_drafts(owner_id: str, limit: int = 20) -> List[Dict]:
     path = _draft_file(owner_id)
     if not os.path.exists(path):
@@ -1594,6 +1756,84 @@ def delete_local_draft(owner_id: str, draft_id: str) -> bool:
     return True
 
 
+def delete_local_drafts(owner_id: str, draft_ids: List[str]) -> int:
+    targets = {str(item or "").strip() for item in (draft_ids or []) if str(item or "").strip()}
+    if not targets:
+        return 0
+    rows = _read_draft_rows(owner_id)
+    next_rows = [row for row in rows if str(row.get("id") or "").strip() not in targets]
+    deleted = len(rows) - len(next_rows)
+    if deleted <= 0:
+        return 0
+    _write_draft_rows(owner_id, next_rows)
+    return deleted
+
+
+def mark_local_draft_delivery(
+    owner_id: str,
+    draft_id: str,
+    platform: str,
+    status: str,
+    message: str = "",
+    source: str = "",
+    task_id: str = "",
+    extra: Dict = None,
+) -> Optional[Dict]:
+    draft = get_local_draft(owner_id, draft_id)
+    if not draft:
+        return None
+    metadata = draft.get("metadata", {}) if isinstance(draft.get("metadata"), dict) else {}
+    delivery = metadata.get("delivery", {}) if isinstance(metadata.get("delivery"), dict) else {}
+    platform_key = str(platform or "wechat").strip().lower() or "wechat"
+    current = delivery.get(platform_key, {}) if isinstance(delivery.get(platform_key), dict) else {}
+    now_iso = datetime.now().isoformat()
+
+    next_item = dict(current)
+    next_item["status"] = str(status or "").strip().lower()
+    next_item["message"] = str(message or "").strip()
+    next_item["last_try_at"] = now_iso
+    if str(source or "").strip():
+        next_item["source"] = str(source).strip()
+    if str(task_id or "").strip():
+        next_item["task_id"] = str(task_id).strip()
+    if next_item["status"] == "success":
+        next_item["delivered_at"] = now_iso
+
+    safe_extra = None
+    if isinstance(extra, dict) and extra:
+        safe_extra = {}
+        for key, value in extra.items():
+            safe_extra[str(key)[:64]] = str(value)[:1000] if not isinstance(value, (dict, list)) else value
+        next_item["extra"] = safe_extra
+
+    history = next_item.get("history", [])
+    if not isinstance(history, list):
+        history = []
+    row = {
+        "status": next_item["status"],
+        "message": next_item["message"],
+        "time": now_iso,
+        "source": next_item.get("source", ""),
+        "task_id": next_item.get("task_id", ""),
+    }
+    if safe_extra:
+        row["extra"] = safe_extra
+    history.insert(0, row)
+    next_item["history"] = history[:20]
+
+    delivery[platform_key] = next_item
+    metadata["delivery"] = delivery
+    return update_local_draft(
+        owner_id=owner_id,
+        draft_id=draft_id,
+        title=str(draft.get("title") or ""),
+        content=str(draft.get("content") or ""),
+        platform=str(draft.get("platform") or "wechat"),
+        mode=str(draft.get("mode") or "create"),
+        metadata=metadata,
+    )
+
+
 def _parse_datetime(value: Any) -> Optional[datetime]:
     if value is None:
         return None
@@ -1641,6 +1881,10 @@ def summarize_activity_metrics(
     }
 
     draft_count = 0
+    draft_delivery_total = 0
+    draft_delivery_success = 0
+    draft_delivery_failed = 0
+    draft_delivery_pending = 0
     for row in drafts or []:
         dt = _parse_datetime(_pick_value(row, "created_at"))
         if not dt:
@@ -1650,6 +1894,42 @@ def summarize_activity_metrics(
             continue
         buckets[key]["drafts"] += 1
         draft_count += 1
+
+        metadata = _pick_value(row, "metadata", {})
+        if not isinstance(metadata, dict):
+            continue
+        delivery = metadata.get("delivery", {})
+        if not isinstance(delivery, dict):
+            continue
+        wechat_delivery = delivery.get("wechat", {})
+        if not isinstance(wechat_delivery, dict):
+            continue
+        source = str(wechat_delivery.get("source", "") or "").strip().lower()
+        # 已有 publish_tasks 时按任务状态统计；草稿内仅统计直接投递结果。
+        if source == "publish_queue_task":
+            continue
+        delivery_dt = _parse_datetime(
+            wechat_delivery.get("delivered_at")
+            or wechat_delivery.get("last_try_at")
+            or wechat_delivery.get("updated_at")
+        )
+        if not delivery_dt:
+            continue
+        delivery_key = delivery_dt.date().isoformat()
+        if delivery_key not in buckets:
+            continue
+        status = str(wechat_delivery.get("status", "") or "").strip().lower()
+        if status not in ["success", "failed", "pending", "processing"]:
+            continue
+        draft_delivery_total += 1
+        if status == "success":
+            draft_delivery_success += 1
+            buckets[delivery_key]["publish_success"] += 1
+        elif status == "failed":
+            draft_delivery_failed += 1
+            buckets[delivery_key]["publish_failed"] += 1
+        else:
+            draft_delivery_pending += 1
 
     publish_total = 0
     publish_success = 0
@@ -1673,6 +1953,11 @@ def summarize_activity_metrics(
             buckets[key]["publish_failed"] += 1
         elif status in ["pending", "processing"]:
             publish_pending += 1
+
+    publish_total += draft_delivery_total
+    publish_success += draft_delivery_success
+    publish_failed += draft_delivery_failed
+    publish_pending += draft_delivery_pending
 
     finished = publish_success + publish_failed
     success_rate = round((publish_success / finished) * 100, 2) if finished > 0 else None
@@ -2455,10 +2740,171 @@ def _rewrite_html_images_to_wechat_openapi(content_html: str, access_token: str)
     return rewritten, mapping, warnings
 
 
+def _extract_first_base64_from_text(text: str) -> str:
+    source = str(text or "")
+    if not source:
+        return ""
+    match = re.search(r"(data:image/[a-zA-Z0-9.+-]+;base64,[^)\"'\s]+)", source, flags=re.IGNORECASE)
+    if match and match.group(1):
+        return str(match.group(1)).strip()
+    return ""
+
+
+def _history_html_root() -> Path:
+    raw = str(cfg.get("ai.history_html_dir", "./history_html") or "./history_html").strip()
+    target = Path(raw)
+    if not target.is_absolute():
+        target = Path(os.path.abspath(str(target)))
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _safe_history_name(text: str, limit: int = 80) -> str:
+    name = re.sub(r"[^0-9a-zA-Z_\-\u4e00-\u9fff]+", "_", str(text or "").strip())
+    name = re.sub(r"_+", "_", name).strip("_")
+    if not name:
+        name = "untitled"
+    return name[:max(8, int(limit or 80))]
+
+
+def _save_history_html_snapshot(owner_id: str, title: str, html_content: str) -> str:
+    root = _history_html_root()
+    now = datetime.now()
+    owner = _safe_history_name(owner_id or "anonymous", limit=48)
+    title_part = _safe_history_name(title or "untitled", limit=60)
+    filename = f"{now.strftime('%Y%m%d_%H%M%S')}_{owner}_{title_part}_{uuid.uuid4().hex[:8]}.html"
+    target = root / filename
+    head_meta = (
+        f"<!-- owner_id: {owner_id} -->\n"
+        f"<!-- synced_at: {now.isoformat()} -->\n"
+        f"<!-- title: {title} -->\n"
+    )
+    target.write_text(head_meta + str(html_content or ""), encoding="utf-8")
+    return str(target)
+
+
+def _try_prepare_openapi_article_via_pipeline(
+    item: Dict[str, Any],
+    access_token: str,
+    wechat_app_id: str,
+    wechat_app_secret: str,
+    owner_id: str,
+) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    title = str(item.get("title") or "未命名草稿").strip()
+    markdown = str(item.get("content") or "").strip()
+    if not markdown:
+        return None, {"error": "内容为空"}
+    try:
+        from pipeline import WeChatDraftHelper, _markdown_to_html as pipeline_markdown_to_html, format_markdown
+    except Exception as e:
+        return None, {"error": f"pipeline 模块不可用: {e}"}
+
+    warnings: List[str] = []
+    helper = WeChatDraftHelper(wechat_app_id, wechat_app_secret)
+    cover_url = str(item.get("cover_url") or "").strip()
+
+    cover_path = ""
+    first_base64 = _extract_first_base64_from_text(markdown)
+    if first_base64:
+        try:
+            cover_path = str(helper.save_image_from_base64(first_base64, prefix=f"{_safe_history_name(title, 40)}_cover") or "").strip()
+        except Exception as e:
+            warnings.append(f"封面 base64 解析失败: {e}")
+            cover_path = ""
+    if not cover_path:
+        candidate_cover = extract_first_image_url_from_text(markdown) or cover_url
+        if candidate_cover:
+            try:
+                cover_path = str(helper.save_image_from_url(candidate_cover) or "").strip()
+            except Exception as e:
+                warnings.append(f"封面下载失败: {e}")
+                cover_path = ""
+
+    thumb_media_id = ""
+    if cover_path:
+        try:
+            thumb_media_id = str(helper.upload_cover_image(cover_path) or "").strip()
+        except Exception as e:
+            warnings.append(f"封面上传失败: {e}")
+
+    if not thumb_media_id:
+        fallback_path = str(
+            cfg.get(
+                "ai.wechat_default_cover_path",
+                os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "default-avatar.png"),
+            ) or ""
+        ).strip()
+        if fallback_path and not os.path.isabs(fallback_path):
+            fallback_path = os.path.abspath(fallback_path)
+        fallback_media_id, fallback_err = _upload_cover_media_openapi_from_local_file(
+            access_token,
+            fallback_path,
+        )
+        thumb_media_id = str(fallback_media_id or "").strip()
+        if fallback_err:
+            warnings.append(f"封面回退失败: {fallback_err}")
+    if not thumb_media_id:
+        return None, {"error": "封面处理失败", "warnings": warnings}
+
+    try:
+        html_content = pipeline_markdown_to_html(markdown)
+    except Exception as e:
+        return None, {"error": f"Markdown 转 HTML 失败: {e}", "warnings": warnings}
+
+    try:
+        clean_html, replacement_map = helper.process_html_content(html_content)
+    except Exception as e:
+        clean_html = html_content
+        replacement_map = {}
+        warnings.append(f"正文图片处理失败: {e}")
+    cleaned_markdown = markdown
+    if isinstance(replacement_map, dict):
+        for old_src, new_src in replacement_map.items():
+            cleaned_markdown = cleaned_markdown.replace(str(old_src), str(new_src))
+
+    formatted_html = ""
+    try:
+        formatted_html = str(format_markdown(cleaned_markdown) or "").strip()
+    except Exception as e:
+        warnings.append(f"排版失败，降级为普通 HTML: {e}")
+        formatted_html = ""
+
+    final_html = formatted_html or clean_html or html_content
+    final_html = _normalize_wechat_img_tags(final_html)
+    final_html, _, upload_warnings = _rewrite_html_images_to_wechat_openapi(final_html, access_token)
+    if upload_warnings:
+        warnings.extend([f"正文图片重传警告: {x}" for x in upload_warnings[:5]])
+
+    cover_for_inject = extract_first_image_url_from_text(cleaned_markdown) or cover_url
+    final_html, injected = _ensure_wechat_body_has_image(final_html, cover_for_inject)
+    if injected:
+        final_html, _, inject_warnings = _rewrite_html_images_to_wechat_openapi(final_html, access_token)
+        if inject_warnings:
+            warnings.extend([f"插图注入上传警告: {x}" for x in inject_warnings[:5]])
+
+    history_path = _save_history_html_snapshot(owner_id=owner_id, title=title, html_content=final_html)
+    digest = str(item.get("digest") or "").strip()[:120]
+    if not digest:
+        digest = _strip_html(final_html)[:120]
+
+    article = {
+        "title": _safe_wechat_title(title),
+        "author": str(item.get("author") or "").strip(),
+        "digest": digest,
+        "content": final_html,
+        "content_source_url": "",
+        "thumb_media_id": thumb_media_id,
+        "need_open_comment": 1,
+        "only_fans_can_comment": 0,
+    }
+    return article, {"warnings": warnings[:20], "history_html_path": history_path}
+
+
 def _publish_batch_to_wechat_draft_openapi(
     items: List[Dict],
     wechat_app_id: str,
     wechat_app_secret: str,
+    owner_id: str = "",
 ) -> Tuple[bool, str, Dict]:
     token, token_err = _get_wechat_openapi_access_token(wechat_app_id, wechat_app_secret)
     if not token:
@@ -2468,12 +2914,31 @@ def _publish_batch_to_wechat_draft_openapi(
     body_image_warnings: List[str] = []
     missing_image_titles: List[str] = []
     cover_warnings: List[str] = []
+    history_html_paths: List[str] = []
     for item in items or []:
         title = str(item.get("title") or "未命名草稿").strip()
         safe_title = _safe_wechat_title(title)
         markdown = str(item.get("content") or "").strip()
         if not markdown:
             continue
+        pipeline_article, pipeline_meta = _try_prepare_openapi_article_via_pipeline(
+            item=item,
+            access_token=token,
+            wechat_app_id=wechat_app_id,
+            wechat_app_secret=wechat_app_secret,
+            owner_id=owner_id,
+        )
+        if pipeline_article:
+            articles.append(pipeline_article)
+            for warning in (pipeline_meta or {}).get("warnings") or []:
+                body_image_warnings.append(f"{title}: {warning}")
+            history_path = str((pipeline_meta or {}).get("history_html_path") or "").strip()
+            if history_path:
+                history_html_paths.append(history_path)
+            continue
+        pipeline_err = str((pipeline_meta or {}).get("error") or "").strip()
+        if pipeline_err:
+            body_image_warnings.append(f"{title}: pipeline 流程降级 -> {pipeline_err}")
         cover_url = str(item.get("cover_url") or "").strip()
         content_html = _normalize_wechat_img_tags(_markdown_to_wechat_html(markdown))
         content_html, _, upload_warnings = _rewrite_html_images_to_wechat_openapi(content_html, token)
@@ -2534,6 +2999,13 @@ def _publish_batch_to_wechat_draft_openapi(
                 cover_warnings.append(f"{title}: {'；'.join(cover_attempt_errors[:3])}")
                 continue
 
+        try:
+            history_html_paths.append(
+                _save_history_html_snapshot(owner_id=owner_id, title=title, html_content=content_html)
+            )
+        except Exception as e:
+            body_image_warnings.append(f"{title}: 保存 history_html 失败 -> {e}")
+
         articles.append(
             {
                 "title": safe_title,
@@ -2552,6 +3024,7 @@ def _publish_batch_to_wechat_draft_openapi(
             "missing_body_image_titles": missing_image_titles,
             "body_image_upload_warnings": body_image_warnings[:20],
             "cover_warnings": cover_warnings[:20],
+            "history_html_paths": history_html_paths[:20],
         }
     if cover_warnings and not articles:
         sample = str(cover_warnings[0] or "").strip()
@@ -2559,6 +3032,7 @@ def _publish_batch_to_wechat_draft_openapi(
         return False, f"微信草稿箱投递失败: 封面处理失败，请检查封面图链接与公众号权限{sample_text}", {
             "cover_warnings": cover_warnings[:20],
             "body_image_upload_warnings": body_image_warnings[:20],
+            "history_html_paths": history_html_paths[:20],
         }
     if not articles:
         return False, "没有有效内容可推送", {}
@@ -2590,6 +3064,7 @@ def _publish_batch_to_wechat_draft_openapi(
             msg += f"（封面降级 {len(cover_warnings)} 项）"
         payload["body_image_upload_warnings"] = body_image_warnings[:20]
         payload["cover_warnings"] = cover_warnings[:20]
+        payload["history_html_paths"] = history_html_paths[:20]
         return True, msg, payload
     errcode = payload.get("errcode")
     errmsg = payload.get("errmsg")
@@ -2612,7 +3087,12 @@ def publish_batch_to_wechat_draft(
     app_id = str(wechat_app_id or "").strip()
     app_secret = str(wechat_app_secret or "").strip()
     if app_id and app_secret:
-        return _publish_batch_to_wechat_draft_openapi(items=items, wechat_app_id=app_id, wechat_app_secret=app_secret)
+        return _publish_batch_to_wechat_draft_openapi(
+            items=items,
+            wechat_app_id=app_id,
+            wechat_app_secret=app_secret,
+            owner_id=owner_id,
+        )
     if app_id or app_secret:
         return False, "同步到草稿箱需要同时提供 wechat_app_id 与 wechat_app_secret", {}
     try:

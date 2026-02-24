@@ -8,6 +8,8 @@ from core.ai_service import (
     get_local_draft,
     update_local_draft,
     delete_local_draft,
+    delete_local_drafts,
+    mark_local_draft_delivery,
 )
 
 
@@ -57,6 +59,47 @@ class AIDraftOpsTestCase(unittest.TestCase):
         deleted = delete_local_draft(owner, draft_id)
         self.assertTrue(deleted)
         self.assertIsNone(get_local_draft(owner, draft_id))
+
+    def test_mark_delivery_and_batch_delete(self):
+        owner = "ops-user-batch"
+        first = save_local_draft(
+            owner_id=owner,
+            article_id="a-101",
+            title="title 101",
+            content="content 101",
+            platform="wechat",
+            mode="create",
+            metadata={},
+        )
+        second = save_local_draft(
+            owner_id=owner,
+            article_id="a-102",
+            title="title 102",
+            content="content 102",
+            platform="wechat",
+            mode="create",
+            metadata={},
+        )
+        self.assertTrue(first.get("id"))
+        self.assertTrue(second.get("id"))
+
+        updated = mark_local_draft_delivery(
+            owner_id=owner,
+            draft_id=first["id"],
+            platform="wechat",
+            status="success",
+            message="ok",
+            source="test",
+        )
+        self.assertIsNotNone(updated)
+        delivery = (updated.get("metadata") or {}).get("delivery") or {}
+        self.assertEqual(((delivery.get("wechat") or {}).get("status") or ""), "success")
+        self.assertTrue((delivery.get("wechat") or {}).get("delivered_at"))
+
+        deleted = delete_local_drafts(owner, [first["id"], second["id"], ""])
+        self.assertEqual(deleted, 2)
+        self.assertIsNone(get_local_draft(owner, first["id"]))
+        self.assertIsNone(get_local_draft(owner, second["id"]))
 
 
 if __name__ == "__main__":

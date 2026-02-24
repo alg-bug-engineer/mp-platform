@@ -1,26 +1,43 @@
 export interface MessageTask {
-  id: number
+  id: string
+  name: string
+  message_type: number
   message_template: string
   web_hook_url: string
   mps_id: any // JSON类型
   status: number
   cron_exp?: string
+  auto_compose_sync_enabled?: number
+  auto_compose_platform?: string
+  auto_compose_instruction?: string
+  auto_compose_last_article_id?: string
+  auto_compose_last_sync_at?: string
   created_at: string
   updated_at: string
 }
 
 export interface MessageTaskCreate {
+  name: string
+  message_type: number
   message_template: string
   web_hook_url: string
   mps_id: any
   status?: number
   cron_exp?: string
+  auto_compose_sync_enabled?: number
+  auto_compose_platform?: string
+  auto_compose_instruction?: string
 }
 
 export interface MessageTaskUpdate {
+  name?: string
+  message_type?: number
   message_template?: string
   web_hook_url?: string
   mps_id?: any
   status?: number
   cron_exp?: string
+  auto_compose_sync_enabled?: number
+  auto_compose_platform?: string
+  auto_compose_instruction?: string
 }

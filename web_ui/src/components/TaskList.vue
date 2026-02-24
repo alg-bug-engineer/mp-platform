@@ -16,10 +16,10 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'pageChange', page: number): void
   (e: 'loadMore'): void
-  (e: 'edit', id: number): void
-  (e: 'test', id: number): void
-  (e: 'run', id: number): void
-  (e: 'delete', id: number): void
+  (e: 'edit', id: string): void
+  (e: 'test', id: string): void
+  (e: 'run', id: string): void
+  (e: 'delete', id: string): void
 }>()
 
 const parseCronExpression = (exp: string) => {
@@ -107,6 +107,13 @@ const parseCronExpression = (exp: string) => {
             </a-tag>
           </template>
         </a-table-column>
+        <a-table-column title="自动创作同步" :width="140">
+          <template #cell="{ record }">
+            <a-tag :color="Number(record.auto_compose_sync_enabled || 0) === 1 ? 'green' : 'gray'">
+              {{ Number(record.auto_compose_sync_enabled || 0) === 1 ? '已开启' : '未开启' }}
+            </a-tag>
+          </template>
+        </a-table-column>
         <a-table-column title="操作" :width="260">
           <template #cell="{ record }">
             <slot name="actions" :record="record"></slot>
@@ -129,6 +136,9 @@ const parseCronExpression = (exp: string) => {
                 </a-tag>
                 <a-tag :color="item.status === 1 ? 'green' : 'red'">
                   {{ item.status === 1 ? '启用' : '禁用' }}
+                </a-tag>
+                <a-tag :color="Number(item.auto_compose_sync_enabled || 0) === 1 ? 'green' : 'gray'">
+                  {{ Number(item.auto_compose_sync_enabled || 0) === 1 ? '自动创作同步' : '普通任务' }}
                 </a-tag>
               </div>
             </template>

@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 import os
 import re
@@ -11,27 +11,23 @@ from core.db import DB
 from core.models.article import Article
 from core.models.base import DATA_STATUS
 from core.models.ai_publish_task import AIPublishTask
+from core.models.ai_compose_task import AIComposeTask
 from core.models.ai_daily_usage import AIDailyUsage
 from core.models.user import User as DBUser
 from core.config import cfg
 from core.ai_service import (
-    get_or_create_profile,
     get_platform_profile,
-    build_prompt,
-    call_openai_compatible,
     recommend_tags_from_title,
-    get_compose_options,
-    build_image_prompts,
     build_inline_image_prompt,
     generate_images_with_jimeng,
-    merge_image_urls_into_markdown,
-    refine_draft,
-    ensure_markdown_content,
     save_local_draft,
     list_local_drafts,
     get_local_draft,
     update_local_draft,
     delete_local_draft,
+    delete_local_drafts,
+    mark_local_draft_delivery,
+    extract_first_image_url_from_text,
     publish_batch_to_wechat_draft,
     enqueue_publish_task,
     serialize_publish_task,
@@ -40,6 +36,16 @@ from core.ai_service import (
     summarize_activity_metrics,
     PUBLISH_STATUS_PENDING,
     PUBLISH_STATUS_FAILED,
+)
+from core.ai_compose_queue_service import (
+    enqueue_compose_task,
+    list_compose_tasks,
+    serialize_compose_task,
+    count_compose_tasks,
+    COMPOSE_TASK_STATUS_PENDING,
+    COMPOSE_TASK_STATUS_PROCESSING,
+    COMPOSE_TASK_STATUS_SUCCESS,
+    COMPOSE_TASK_STATUS_FAILED,
 )
 from core.prompt_templates import get_frontend_options
 from core.plan_service import (
@@ -73,19 +79,32 @@ def _should_enqueue_publish_retry(message: str, raw: dict) -> bool:
     return True
 
 
-def _extract_first_image_url_from_text(text: str) -> str:
-    source = str(text or "")
-    markdown_match = re.search(r"!\[[^\]]*\]\((https?://[^)\s]+)[^)]*\)", source, flags=re.IGNORECASE)
-    if markdown_match and markdown_match.group(1):
-        return str(markdown_match.group(1)).strip()
-    html_match = re.search(r"<img[^>]+src=[\"'](https?://[^\"']+)[\"']", source, flags=re.IGNORECASE)
-    if html_match and html_match.group(1):
-        return str(html_match.group(1)).strip()
-    return ""
-
-
 def _wechat_profile_setup_hint() -> str:
     return "请先在个人中心填写公众号 AppID 与 AppSecret（个人中心 -> 修改个人信息）后再同步"
+
+
+def _build_delivery_extra(raw: dict) -> Dict[str, object]:
+    if not isinstance(raw, dict):
+        return {}
+    extra: Dict[str, object] = {}
+    for key in ["media_id", "errcode", "errmsg", "msg", "status_code"]:
+        value = raw.get(key)
+        if value in [None, ""]:
+            continue
+        extra[key] = value
+    for key in [
+        "cover_warnings",
+        "body_image_upload_warnings",
+        "missing_body_image_titles",
+        "auto_image_injected_titles",
+        "cover_from_first_body_image_titles",
+    ]:
+        value = raw.get(key)
+        if isinstance(value, list) and value:
+            extra[key] = value[:5]
+    if not extra and raw:
+        extra["raw_preview"] = str(raw)[:800]
+    return extra
 
 
 def _resolve_wechat_openapi_credentials(user: Optional[DBUser], app_id: str, app_secret: str) -> Tuple[str, str, str]:
@@ -172,12 +191,31 @@ def _consume_daily_ai_usage(session, owner_id: str, amount: int = 1, now: Option
     return _daily_usage_snapshot(session, owner_id, now=target)
 
 
+def _parse_compose_status_filter(status_text: str) -> List[str]:
+    raw = str(status_text or "").strip().lower()
+    if not raw:
+        return []
+    values = []
+    for item in re.split(r"[,\s;]+", raw):
+        key = str(item or "").strip().lower()
+        if not key:
+            continue
+        if key in {
+            COMPOSE_TASK_STATUS_PENDING,
+            COMPOSE_TASK_STATUS_PROCESSING,
+            COMPOSE_TASK_STATUS_SUCCESS,
+            COMPOSE_TASK_STATUS_FAILED,
+        }:
+            values.append(key)
+    return values
+
+
 class AIComposeRequest(BaseModel):
     instruction: str = Field(default="", max_length=4000)
     platform: str = Field(default="wechat", max_length=32)
     style: str = Field(default="专业深度", max_length=64)
     length: str = Field(default="medium", max_length=32)
-    image_count: int = Field(default=0, ge=0, le=9)
+    image_count: int = Field(default=2, ge=0, le=9)
     audience: str = Field(default="", max_length=200)
     tone: str = Field(default="", max_length=200)
     generate_images: bool = Field(default=True)
@@ -227,6 +265,10 @@ class DraftUpdateRequest(BaseModel):
     content: Optional[str] = Field(default=None, max_length=50000)
     platform: Optional[str] = Field(default=None, max_length=32)
     mode: Optional[str] = Field(default=None, max_length=32)
+
+
+class DraftBatchDeleteRequest(BaseModel):
+    ids: List[str] = Field(default_factory=list)
 
 
 class DraftSyncRequest(BaseModel):
@@ -331,6 +373,11 @@ async def workbench_overview(current_user: dict = Depends(get_current_user)):
                 AIPublishTask.owner_id == owner_id,
                 AIPublishTask.status.in_([PUBLISH_STATUS_PENDING, PUBLISH_STATUS_FAILED]),
             ).count(),
+            "pending_compose_count": count_compose_tasks(
+                session,
+                owner_id=owner_id,
+                statuses=[COMPOSE_TASK_STATUS_PENDING, COMPOSE_TASK_STATUS_PROCESSING],
+            ),
             "daily_ai_limit": daily_ai.get("limit", 0),
             "daily_ai_used": daily_ai.get("used", 0),
             "daily_ai_remaining": daily_ai.get("remaining", 0),
@@ -408,6 +455,27 @@ async def remove_draft(
     return success_response({"id": draft_id, "deleted": True}, message="草稿已删除")
 
 
+@router.post("/drafts/batch-delete", summary="批量删除本地草稿")
+async def remove_drafts_batch(
+    payload: DraftBatchDeleteRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    owner_id = _owner(current_user)
+    targets = []
+    visited = set()
+    for item in payload.ids or []:
+        draft_id = str(item or "").strip()
+        if not draft_id or draft_id in visited:
+            continue
+        visited.add(draft_id)
+        targets.append(draft_id)
+    deleted = delete_local_drafts(owner_id, targets)
+    return success_response(
+        {"deleted": deleted, "requested": len(targets)},
+        message=f"批量删除完成，成功删除 {deleted} 条草稿",
+    )
+
+
 @router.post("/drafts/{draft_id}/sync", summary="将本地草稿同步到平台")
 async def sync_draft(
     draft_id: str,
@@ -448,7 +516,7 @@ async def sync_draft(
         "author": (payload.author or metadata.get("author") or "").strip(),
         "cover_url": (
             payload.cover_url
-            or _extract_first_image_url_from_text(payload.content if payload.content is not None else draft.get("content") or "")
+            or extract_first_image_url_from_text(payload.content if payload.content is not None else draft.get("content") or "")
             or metadata.get("cover_url")
             or ""
         ).strip(),
@@ -483,6 +551,17 @@ async def sync_draft(
         message = f"{message}，已进入重试队列 1 条"
     elif (not synced) and payload.queue_on_fail and not can_enqueue:
         message = f"{message}（官方接口模式暂不支持重试队列）"
+    delivery_status = "success" if synced else ("pending" if queued_task else "failed")
+    updated_draft = mark_local_draft_delivery(
+        owner_id=owner_id,
+        draft_id=draft_id,
+        platform=platform,
+        status=delivery_status,
+        message=message,
+        source="draft_sync_action",
+        task_id=str(queued_task.get("id") if isinstance(queued_task, dict) else ""),
+        extra=_build_delivery_extra(raw),
+    )
     session.commit()
     return success_response(
         {
@@ -494,6 +573,7 @@ async def sync_draft(
                 "queued": 1 if queued_task else 0,
             },
             "queued_task": queued_task,
+            "draft": updated_draft,
         },
         message=message,
     )
@@ -582,7 +662,21 @@ async def recommend_tags(payload: TagRecommendRequest, current_user: dict = Depe
     return success_response(data)
 
 
-async def _run(mode: str, article_id: str, payload: AIComposeRequest, current_user: dict):
+def _build_compose_request_payload(payload: AIComposeRequest) -> Dict[str, object]:
+    return {
+        "instruction": payload.instruction,
+        "platform": payload.platform,
+        "style": payload.style,
+        "length": payload.length,
+        "image_count": payload.image_count,
+        "audience": payload.audience,
+        "tone": payload.tone,
+        "generate_images": payload.generate_images,
+        "force_refresh": payload.force_refresh,
+    }
+
+
+async def _submit_compose_task(mode: str, article_id: str, payload: AIComposeRequest, current_user: dict):
     session = DB.get_session()
     owner_id = _owner(current_user)
     article = session.query(Article).filter(
@@ -597,17 +691,6 @@ async def _run(mode: str, article_id: str, payload: AIComposeRequest, current_us
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    create_options = {
-        "platform": payload.platform,
-        "style": payload.style,
-        "length": payload.length,
-        "image_count": payload.image_count,
-        "audience": payload.audience,
-        "tone": payload.tone,
-        "generate_images": payload.generate_images,
-    }
-    instruction_text = (payload.instruction or "").strip()
-
     requested_images = payload.image_count if (mode == "create" and payload.generate_images) else 0
     ok, reason, _ = validate_ai_action(user, mode=mode, image_count=requested_images)
     if not ok:
@@ -619,82 +702,62 @@ async def _run(mode: str, article_id: str, payload: AIComposeRequest, current_us
             detail=f"今日 AI 调用次数已达上限（{daily_usage['limit']}次），请明天 00:00 后再试",
         )
 
-    profile = get_or_create_profile(session, owner_id)
-
-    system_prompt, user_prompt = build_prompt(
-        mode=mode,
-        title=article.title or "",
-        content=article.content or article.description or "",
-        instruction=instruction_text,
-        create_options=create_options,
+    pending_limit = max(1, int(cfg.get("ai.compose_queue_max_pending_per_user", 30) or 30))
+    pending_count = count_compose_tasks(
+        session,
+        owner_id=owner_id,
+        statuses=[COMPOSE_TASK_STATUS_PENDING, COMPOSE_TASK_STATUS_PROCESSING],
     )
-
-    text = call_openai_compatible(profile, system_prompt, user_prompt)
-    text = refine_draft(
-        profile=profile,
-        mode=mode,
-        draft=text,
-        title=article.title or "",
-        create_options=create_options,
-        instruction=instruction_text,
-    )
-    text = ensure_markdown_content(mode=mode, title=article.title or "AI 草稿", text=text)
-
-    result = {
-        "article_id": article.id,
-        "mode": mode,
-        "result": text,
-        "recommended_tags": recommend_tags_from_title(article.title or ""),
-        "options": create_options,
-        "source_title": article.title or "",
-    }
-
-    if mode == "create":
-        prompts = build_image_prompts(
-            title=article.title or "",
-            platform=payload.platform,
-            style=payload.style,
-            image_count=payload.image_count,
-            content=text,
+    if pending_count >= pending_limit:
+        raise HTTPException(
+            status_code=429,
+            detail=f"当前排队任务过多（{pending_count}/{pending_limit}），请稍后再试",
         )
-        image_urls = []
-        image_notice = ""
-        if payload.generate_images and prompts:
-            image_urls, image_notice = generate_images_with_jimeng(prompts)
-            if image_urls:
-                text = merge_image_urls_into_markdown(text, image_urls)
-                result["result"] = text
-        result["image_prompts"] = prompts
-        result["images"] = image_urls
-        result["image_notice"] = image_notice
 
-    local_draft = save_local_draft(
+    task = enqueue_compose_task(
+        session=session,
         owner_id=owner_id,
         article_id=article.id,
-        title=(article.title or "AI 创作草稿").strip(),
-        content=result.get("result", ""),
-        platform=payload.platform or "wechat",
         mode=mode,
-        metadata={
-            "digest": "",
-            "author": "",
-            "cover_url": _extract_first_image_url_from_text(result.get("result", "")),
-            "instruction": instruction_text,
-            "options": create_options,
+        request_payload=_build_compose_request_payload(payload),
+    )
+    queued_total = count_compose_tasks(
+        session,
+        owner_id=owner_id,
+        statuses=[COMPOSE_TASK_STATUS_PENDING, COMPOSE_TASK_STATUS_PROCESSING],
+    )
+    return success_response(
+        {
+            "task": serialize_compose_task(task),
+            "queued_total": queued_total,
         },
+        message="任务已提交，正在后台处理中",
     )
 
-    daily_usage = _consume_daily_ai_usage(session, owner_id, amount=1)
-    consume_ai_usage(user, image_count=requested_images)
-    summary = get_user_plan_summary(user)
-    session.commit()
-    result["plan"] = _serialize_plan(summary)
-    result["daily_ai"] = daily_usage
-    result["from_cache"] = False
-    result["cached_at"] = ""
-    result["result_id"] = ""
-    result["local_draft"] = local_draft
-    return success_response(result)
+
+@router.get("/compose/tasks", summary="获取创作任务列表")
+async def get_compose_tasks(
+    status: str = Query(default=""),
+    limit: int = Query(default=30, ge=1, le=100),
+    current_user: dict = Depends(get_current_user),
+):
+    session = DB.get_session()
+    owner_id = _owner(current_user)
+    statuses = _parse_compose_status_filter(status)
+    rows = list_compose_tasks(session, owner_id=owner_id, statuses=statuses, limit=limit)
+    return success_response([serialize_compose_task(row, include_result=False) for row in rows])
+
+
+@router.get("/compose/tasks/{task_id}", summary="获取创作任务详情")
+async def get_compose_task(task_id: str, current_user: dict = Depends(get_current_user)):
+    session = DB.get_session()
+    row = session.query(AIComposeTask).filter(
+        AIComposeTask.id == task_id,
+        AIComposeTask.owner_id == _owner(current_user),
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return success_response(serialize_compose_task(row, include_result=True))
 
 
 @router.post("/articles/{article_id}/publish-draft", summary="发布到草稿箱（本地+公众号）")
@@ -726,7 +789,7 @@ async def publish_draft(article_id: str, payload: DraftPublishRequest, current_u
                     "content": content_text,
                     "digest": item.digest or "",
                     "author": item.author or "",
-                    "cover_url": (item.cover_url or _extract_first_image_url_from_text(content_text) or ""),
+                    "cover_url": (item.cover_url or extract_first_image_url_from_text(content_text) or ""),
                 }
             )
     else:
@@ -739,7 +802,7 @@ async def publish_draft(article_id: str, payload: DraftPublishRequest, current_u
                 "content": content,
                 "digest": payload.digest or "",
                 "author": payload.author or "",
-                "cover_url": (payload.cover_url or _extract_first_image_url_from_text(content) or ""),
+                "cover_url": (payload.cover_url or extract_first_image_url_from_text(content) or ""),
             }
         )
 
@@ -769,6 +832,7 @@ async def publish_draft(article_id: str, payload: DraftPublishRequest, current_u
         "raw": {},
         "queued": 0,
     }
+    wechat_attempted = False
 
     if payload.sync_to_wechat:
         wechat_app_id, wechat_app_secret, source = _resolve_wechat_openapi_credentials(
@@ -785,6 +849,7 @@ async def publish_draft(article_id: str, payload: DraftPublishRequest, current_u
             if not ok:
                 wechat_result["message"] = f"已保存本地草稿，公众号同步未执行：{reason}"
             else:
+                wechat_attempted = True
                 synced, message, raw = publish_batch_to_wechat_draft(
                     publish_items,
                     owner_id=owner_id,
@@ -824,6 +889,26 @@ async def publish_draft(article_id: str, payload: DraftPublishRequest, current_u
                 elif not synced and payload.queue_on_fail and not can_enqueue:
                     wechat_result["message"] = f"{message}（官方接口模式暂不支持重试队列）"
 
+    if wechat_attempted:
+        delivery_status = "success" if wechat_result.get("synced") else ("pending" if queued_tasks else "failed")
+        synced_locals = []
+        queued_task_id = ""
+        if queued_tasks:
+            queued_task_id = str(queued_tasks[0].get("id") or "")
+        for row in local_records:
+            updated = mark_local_draft_delivery(
+                owner_id=owner_id,
+                draft_id=str(row.get("id") or ""),
+                platform=str(payload.platform or "wechat"),
+                status=delivery_status,
+                message=str(wechat_result.get("message") or ""),
+                source="publish_action",
+                task_id=queued_task_id,
+                extra=_build_delivery_extra(wechat_result.get("raw") if isinstance(wechat_result, dict) else {}),
+            )
+            synced_locals.append(updated or row)
+        local_records = synced_locals
+
     plan = get_user_plan_summary(user)
     session.commit()
 
@@ -838,17 +923,17 @@ async def publish_draft(article_id: str, payload: DraftPublishRequest, current_u
 
 @router.post("/articles/{article_id}/analyze", summary="一键分析")
 async def analyze(article_id: str, payload: AIComposeRequest, current_user: dict = Depends(get_current_user)):
-    return await _run("analyze", article_id, payload, current_user)
+    return await _submit_compose_task("analyze", article_id, payload, current_user)
 
 
 @router.post("/articles/{article_id}/create", summary="一键创作")
 async def create(article_id: str, payload: AIComposeRequest, current_user: dict = Depends(get_current_user)):
-    return await _run("create", article_id, payload, current_user)
+    return await _submit_compose_task("create", article_id, payload, current_user)
 
 
 @router.post("/articles/{article_id}/rewrite", summary="一键仿写")
 async def rewrite(article_id: str, payload: AIComposeRequest, current_user: dict = Depends(get_current_user)):
-    return await _run("rewrite", article_id, payload, current_user)
+    return await _submit_compose_task("rewrite", article_id, payload, current_user)
 
 
 @router.post("/articles/{article_id}/illustrate", summary="根据选中文本生成内容配图")

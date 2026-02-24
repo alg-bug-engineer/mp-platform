@@ -151,6 +151,14 @@ ai:
   draft_dir: ${AI_DRAFT_DIR:-./data/ai_drafts}
   # 投递队列处理间隔（秒）
   publish_queue_interval_seconds: ${AI_PUBLISH_QUEUE_INTERVAL_SECONDS:-45}
+  # AI 创作任务队列 worker 数量（建议 2-4）
+  compose_queue_workers: ${AI_COMPOSE_QUEUE_WORKERS:-3}
+  # AI 创作任务队列每轮抓取数量
+  compose_queue_batch_size: ${AI_COMPOSE_QUEUE_BATCH_SIZE:-3}
+  # AI 创作队列空闲轮询间隔（秒）
+  compose_queue_idle_sleep_seconds: ${AI_COMPOSE_QUEUE_IDLE_SLEEP_SECONDS:-1}
+  # 单用户最多待处理创作任务数（pending+processing）
+  compose_queue_max_pending_per_user: ${AI_COMPOSE_QUEUE_MAX_PENDING_PER_USER:-30}
   # 平台统一 AI 服务配置（前端用户无需填写 API Key）
   provider:
     base_url: ${AI_PROVIDER_BASE_URL:-https://api.moonshot.cn/v1}

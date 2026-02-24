@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { listMessageTasks, deleteMessageTask,FreshJobApi,FreshJobByIdApi,RunMessageTask } from '@/api/messageTask'
+import { listMessageTasks, deleteMessageTask,FreshJobApi,FreshJobByIdApi,RunMessageTask, listMessageTaskLogs } from '@/api/messageTask'
 import type { MessageTask } from '@/types/messageTask'
+import type { MessageTaskExecutionLog } from '@/api/messageTask'
 import { useRouter } from 'vue-router'
 import { Message, Modal } from '@arco-design/web-vue'
 import ResponsiveTable from '@/components/ResponsiveTable.vue'
@@ -95,6 +96,11 @@ const pagination = ref({
   pageSize: 10,
   total: 0
 })
+const logsVisible = ref(false)
+const logsLoading = ref(false)
+const logsTaskName = ref('')
+const logsTaskId = ref('')
+const logs = ref<MessageTaskExecutionLog[]>([])
 
 const fetchTaskList = async () => {
   loading.value = true
@@ -133,11 +139,18 @@ const handleLoadMore = async () => {
 const handleAdd = () => {
   router.push('/message-tasks/add')
 }
-const FreshJob = () => {
-  FreshJobApi().then((data) => {
-    console.log("刷新任务")
-    Message.success(data.message||"刷新任务成功")
-  })
+const freshJobLoading = ref(false)
+const FreshJob = async () => {
+  freshJobLoading.value = true
+  try {
+    const data = await FreshJobApi()
+    Message.success(data?.message || '刷新任务成功')
+  } catch (error: any) {
+    console.error(error)
+    Message.error(String(error || '刷新任务失败'))
+  } finally {
+    freshJobLoading.value = false
+  }
 }
 
 // 切换浏览器通知
@@ -157,11 +170,11 @@ const toggleNotification = async () => {
   }
 }
 
-const handleEdit = (id: number) => {
+const handleEdit = (id: string) => {
   router.push(`/message-tasks/edit/${id}`)
 }
 
-const handleDelete = async (id: number) => {
+const handleDelete = async (id: string) => {
   Modal.confirm({
     title: '确认删除',
     content: '确定要删除这条消息任务吗？删除后无法恢复',
@@ -179,7 +192,7 @@ const handleDelete = async (id: number) => {
     }
   })
 }
-const runTask = async (id: number,isTest:boolean=false) => {
+const runTask = async (id: string,isTest:boolean=false) => {
   Modal.confirm({
     title: '确认执行',
     content: '确定要执行这条消息任务吗？',
@@ -196,6 +209,22 @@ const runTask = async (id: number,isTest:boolean=false) => {
       }
     }
   })
+}
+
+const showTaskLogs = async (record: MessageTask) => {
+  logsTaskId.value = String(record?.id || '')
+  logsTaskName.value = String(record?.name || '')
+  logsVisible.value = true
+  logsLoading.value = true
+  try {
+    const resp = await listMessageTaskLogs(logsTaskId.value, { limit: 100, offset: 0 })
+    logs.value = resp.list || []
+  } catch (error) {
+    console.error(error)
+    Message.error('加载执行日志失败')
+  } finally {
+    logsLoading.value = false
+  }
 }
 
 onMounted(() => {
@@ -221,7 +250,7 @@ onMounted(() => {
           </a-button>
         </a-tooltip>
         <a-tooltip content="点击应用按钮后任务才会生效">
-          <a-button type="primary" @click="FreshJob">应用</a-button>
+          <a-button type="primary" :loading="freshJobLoading" @click="FreshJob">应用</a-button>
         </a-tooltip>
         <a-button type="primary" @click="handleAdd">添加消息任务</a-button>
       </div>
@@ -258,6 +287,13 @@ onMounted(() => {
             </a-tag>
           </template>
         </a-table-column>
+        <a-table-column title="自动创作同步" :width="140">
+          <template #cell="{ record }">
+            <a-tag :color="Number(record.auto_compose_sync_enabled || 0) === 1 ? 'green' : 'gray'">
+              {{ Number(record.auto_compose_sync_enabled || 0) === 1 ? '已开启' : '未开启' }}
+            </a-tag>
+          </template>
+        </a-table-column>
       </template>
 
       <template #list-item-meta="{ item }">
@@ -274,6 +310,9 @@ onMounted(() => {
               <a-tag :color="item.status === 1 ? 'green' : 'red'">
                 {{ item.status === 1 ? '启用' : '禁用' }}
               </a-tag>
+              <a-tag :color="Number(item.auto_compose_sync_enabled || 0) === 1 ? 'green' : 'gray'">
+                {{ Number(item.auto_compose_sync_enabled || 0) === 1 ? '自动创作同步' : '普通任务' }}
+              </a-tag>
             </div>
           </template>
         </a-list-item-meta>
@@ -282,6 +321,7 @@ onMounted(() => {
       <template #actions="{ record }">
         <a-space>
           <a-button size="mini" type="primary" @click="handleEdit(record.id)">编辑</a-button>
+          <a-button size="mini" @click="showTaskLogs(record)">日志</a-button>
           <a-tooltip content="点击测试消息任务">
             <a-button size="mini" type="dashed" @click="runTask(record.id, true)">测试</a-button>
           </a-tooltip>
@@ -295,12 +335,40 @@ onMounted(() => {
       <template #mobile-actions="{ record }">
         <a-space>
           <a-button size="mini" type="primary" @click="handleEdit(record.id)">编辑</a-button>
+          <a-button size="mini" @click="showTaskLogs(record)">日志</a-button>
           <a-button size="mini" type="dashed" @click="runTask(record.id, true)">测试</a-button>
           <a-button size="mini" type="dashed" @click="runTask(record.id)">执行</a-button>
           <a-button size="mini" status="danger" @click="handleDelete(record.id)">删除</a-button>
         </a-space>
       </template>
     </TaskList>
+
+    <a-modal
+      v-model:visible="logsVisible"
+      :title="`执行日志 - ${logsTaskName || logsTaskId}`"
+      width="920px"
+      :footer="false"
+    >
+      <a-spin :loading="logsLoading">
+        <a-table :data="logs" :pagination="false" :scroll="{ y: 420 }">
+          <a-table-column title="时间" data-index="created_at" :width="200" />
+          <a-table-column title="公众号ID" data-index="mps_id" :width="180" />
+          <a-table-column title="更新数" data-index="update_count" :width="90" />
+          <a-table-column title="状态" :width="90">
+            <template #cell="{ record }">
+              <a-tag :color="Number(record.status || 0) === 1 ? 'green' : 'red'">
+                {{ Number(record.status || 0) === 1 ? '成功' : '失败' }}
+              </a-tag>
+            </template>
+          </a-table-column>
+          <a-table-column title="日志详情">
+            <template #cell="{ record }">
+              <pre class="task-log-pre">{{ record.log }}</pre>
+            </template>
+          </a-table-column>
+        </a-table>
+      </a-spin>
+    </a-modal>
     </div>
   </a-spin>
 </template>
@@ -366,6 +434,16 @@ h2 {
 
 .a-list-item-meta-description .arco-tag {
   margin-right: 8px;
+}
+
+.task-log-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 180px;
+  overflow: auto;
 }
 
 .a-list-item-extra {

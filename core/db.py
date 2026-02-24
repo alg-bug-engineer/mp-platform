@@ -52,6 +52,8 @@ class Db:
                                      )
             self.session_factory=self.get_session_factory()
             self._ensure_user_profile_columns()
+            self._ensure_message_task_columns()
+            self._ensure_message_task_log_table()
         except Exception as e:
             print(f"Error creating database connection: {e}")
             raise
@@ -83,6 +85,47 @@ class Db:
                     raise
         except Exception as e:
             print_warning(f"[{self.tag}] ensure users schema failed: {e}")
+
+    def _ensure_message_task_columns(self) -> None:
+        """Best-effort online schema patch for message task automation fields."""
+        if not self.engine:
+            return
+        try:
+            inspector = inspect(self.engine)
+            if not inspector.has_table("message_tasks"):
+                return
+            existing = {str(col.get("name") or "").strip() for col in inspector.get_columns("message_tasks")}
+            needed = {
+                "auto_compose_sync_enabled": "INTEGER DEFAULT 0",
+                "auto_compose_platform": "VARCHAR(32) DEFAULT 'wechat'",
+                "auto_compose_instruction": "TEXT",
+                "auto_compose_last_article_id": "VARCHAR(255) DEFAULT ''",
+                "auto_compose_last_sync_at": "DATETIME",
+            }
+            for name, ddl in needed.items():
+                if name in existing:
+                    continue
+                stmt = text(f"ALTER TABLE message_tasks ADD COLUMN {name} {ddl}")
+                try:
+                    with self.engine.begin() as conn:
+                        conn.execute(stmt)
+                except Exception as e:
+                    msg = str(e).lower()
+                    if "duplicate column" in msg or "already exists" in msg:
+                        continue
+                    raise
+        except Exception as e:
+            print_warning(f"[{self.tag}] ensure message_tasks schema failed: {e}")
+
+    def _ensure_message_task_log_table(self) -> None:
+        """Best-effort create message task logs table."""
+        if not self.engine:
+            return
+        try:
+            from core.models.message_task_log import MessageTaskLog
+            MessageTaskLog.__table__.create(bind=self.engine, checkfirst=True)
+        except Exception as e:
+            print_warning(f"[{self.tag}] ensure message_tasks_logs table failed: {e}")
     def create_tables(self):
         """Create all tables defined in models"""
         from core.models.base import Base as B # 导入所有模型

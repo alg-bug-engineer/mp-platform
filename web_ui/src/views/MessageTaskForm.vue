@@ -26,21 +26,34 @@ const formData = ref<MessageTaskCreate>({
   web_hook_url: '',
   mps_id: [],
   status: 1,
-  cron_exp: '*/5 * * * *'
+  cron_exp: '*/5 * * * *',
+  auto_compose_sync_enabled: 0,
+  auto_compose_platform: 'wechat',
+  auto_compose_instruction: '',
 })
 
 const fetchTaskDetail = async (id: string) => {
   loading.value = true
   try {
     const res = await getMessageTask(id)
+    let parsedMps: any[] = []
+    try {
+      parsedMps = JSON.parse(String(res.mps_id || '[]'))
+      if (!Array.isArray(parsedMps)) parsedMps = []
+    } catch (_) {
+      parsedMps = []
+    }
     formData.value = {
-      name: res.name,
-      message_type: res.message_type,
-      message_template: res.message_template,
-      web_hook_url: res.web_hook_url,
-      mps_id: JSON.parse(res.mps_id||[]),
-      status: res.status,
-      cron_exp: res.cron_exp
+      name: res.name || '',
+      message_type: Number(res.message_type || 0),
+      message_template: res.message_template || '',
+      web_hook_url: res.web_hook_url || '',
+      mps_id: parsedMps,
+      status: Number(res.status || 0),
+      cron_exp: res.cron_exp || '*/5 * * * *',
+      auto_compose_sync_enabled: Number(res.auto_compose_sync_enabled || 0),
+      auto_compose_platform: String(res.auto_compose_platform || 'wechat'),
+      auto_compose_instruction: String(res.auto_compose_instruction || ''),
     }
     // 初始化选择器数据
     nextTick(() => {
@@ -76,7 +89,10 @@ const handleSubmit = async () => {
     // 将mps_id转换为字符串
     const submitData = {
       ...formData.value,
-      mps_id: JSON.stringify(formData.value.mps_id)
+      auto_compose_sync_enabled: Number(formData.value.auto_compose_sync_enabled || 0),
+      auto_compose_platform: String(formData.value.auto_compose_platform || 'wechat'),
+      auto_compose_instruction: String(formData.value.auto_compose_instruction || ''),
+      mps_id: JSON.stringify(formData.value.mps_id || [])
     }
     
     if (isEditMode.value && taskId.value) {
@@ -192,6 +208,30 @@ onMounted(() => {
             />
             <a-button @click="showMpSelector = true">选择</a-button>
           </a-space>
+        </a-form-item>
+
+        <a-divider>自动创作并同步</a-divider>
+
+        <a-form-item label="启用自动创作同步">
+          <a-switch
+            :model-value="formData.auto_compose_sync_enabled === 1"
+            @change="(v) => formData.auto_compose_sync_enabled = v ? 1 : 0"
+          />
+          <span style="margin-left: 8px; color: var(--color-text-3);">开启后，将基于目标公众号最新文章自动创作并同步到草稿箱</span>
+        </a-form-item>
+
+        <a-form-item label="同步平台" field="auto_compose_platform">
+          <a-select v-model="formData.auto_compose_platform" style="width: 300px">
+            <a-option value="wechat">微信公众号草稿箱</a-option>
+          </a-select>
+        </a-form-item>
+
+        <a-form-item label="创作指令（可选）" field="auto_compose_instruction">
+          <a-textarea
+            v-model="formData.auto_compose_instruction"
+            :auto-size="{ minRows: 2, maxRows: 5 }"
+            placeholder="例如：强调实操建议，语气专业克制，避免模板化表达"
+          />
         </a-form-item>
 
         <a-form-item label="状态" field="status">

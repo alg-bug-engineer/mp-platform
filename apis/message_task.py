@@ -9,11 +9,13 @@ from core.print import print_error, print_info
 # 2. 第三方库导入
 from fastapi import APIRouter, Depends, HTTPException, status,Body,Query
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 # 3. 本地应用/模块导入
 from core.auth import get_current_user
 from core.db import DB
 from core.models.message_task import MessageTask
+from core.models.message_task_log import MessageTaskLog
 from .base import success_response, error_response
 
 router = APIRouter(prefix="/message_tasks", tags=["消息任务"])
@@ -21,6 +23,20 @@ router = APIRouter(prefix="/message_tasks", tags=["消息任务"])
 
 def _owner(current_user: dict) -> str:
     return current_user.get("username")
+
+
+def _serialize_log_item(item: MessageTaskLog) -> dict:
+    return {
+        "id": str(getattr(item, "id", "") or ""),
+        "task_id": str(getattr(item, "task_id", "") or ""),
+        "mps_id": str(getattr(item, "mps_id", "") or ""),
+        "owner_id": str(getattr(item, "owner_id", "") or ""),
+        "update_count": int(getattr(item, "update_count", 0) or 0),
+        "status": int(getattr(item, "status", 0) or 0),
+        "log": str(getattr(item, "log", "") or ""),
+        "created_at": item.created_at.isoformat() if getattr(item, "created_at", None) else None,
+        "updated_at": item.updated_at.isoformat() if getattr(item, "updated_at", None) else None,
+    }
 
 @router.get("", summary="获取消息任务列表")
 async def list_message_tasks(
@@ -95,6 +111,42 @@ async def get_message_task(
         if not message_task:
             raise HTTPException(status_code=404, detail="Message task not found")
         return success_response(data=message_task)
+    except Exception as e:
+        return error_response(code=500, message=str(e))
+
+
+@router.get("/{task_id}/logs", summary="获取消息任务执行日志")
+async def get_message_task_logs(
+    task_id: str,
+    limit: int = Query(20, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(get_current_user),
+):
+    db = DB.get_session()
+    try:
+        task = db.query(MessageTask).filter(
+            MessageTask.id == task_id,
+            MessageTask.owner_id == _owner(current_user),
+        ).first()
+        if not task:
+            raise HTTPException(status_code=404, detail="Message task not found")
+        query = db.query(MessageTaskLog).filter(
+            MessageTaskLog.task_id == task_id,
+            or_(
+                MessageTaskLog.owner_id == _owner(current_user),
+                MessageTaskLog.owner_id.is_(None),
+                MessageTaskLog.owner_id == "",
+            ),
+        )
+        total = query.count()
+        rows = query.order_by(MessageTaskLog.created_at.desc()).offset(offset).limit(limit).all()
+        return success_response(
+            {
+                "list": [_serialize_log_item(item) for item in rows],
+                "total": total,
+                "page": {"limit": limit, "offset": offset},
+            }
+        )
     except Exception as e:
         return error_response(code=500, message=str(e))
 @router.get("/message/test/{task_id}", summary="测试消息")
@@ -179,12 +231,15 @@ async def run_message_task(
 
 
 class MessageTaskCreate(BaseModel):
-    message_template: str
-    web_hook_url: str
+    message_template: str=""
+    web_hook_url: str=""
     mps_id: str=""
     name: str=""
     message_type: int=0
     cron_exp:str=""
+    auto_compose_sync_enabled: int = 0
+    auto_compose_platform: str = "wechat"
+    auto_compose_instruction: str = ""
     status: Optional[int] = 0
 
 @router.post("", summary="创建消息任务", status_code=status.HTTP_201_CREATED)
@@ -216,6 +271,9 @@ async def create_message_task(
             mps_id=task_data.mps_id,
             message_type=task_data.message_type,
             name=task_data.name,
+            auto_compose_sync_enabled=1 if int(task_data.auto_compose_sync_enabled or 0) else 0,
+            auto_compose_platform=str(task_data.auto_compose_platform or "wechat").strip().lower() or "wechat",
+            auto_compose_instruction=str(task_data.auto_compose_instruction or "").strip(),
             status=task_data.status if task_data.status is not None else 0
         )
         db.add(db_task)
@@ -271,6 +329,9 @@ async def update_message_task(
             db_task.message_type = task_data.message_type
         if task_data.name is not None:
             db_task.name = task_data.name
+        db_task.auto_compose_sync_enabled = 1 if int(task_data.auto_compose_sync_enabled or 0) else 0
+        db_task.auto_compose_platform = str(task_data.auto_compose_platform or "wechat").strip().lower() or "wechat"
+        db_task.auto_compose_instruction = str(task_data.auto_compose_instruction or "").strip()
         db.commit()
         db.refresh(db_task)
         return success_response(data=db_task)
@@ -284,11 +345,13 @@ async def fresh_message_task(
     """
     重载任务
     """
-    if current_user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可重载任务")
     from jobs.mps import reload_job
-    reload_job()
-    return success_response(message="任务已经重载成功")
+    owner_id = _owner(current_user)
+    if current_user.get("role") == "admin":
+        reload_job()
+        return success_response(message="任务已重载（全量）")
+    reload_job(owner_id=owner_id)
+    return success_response(message="任务已重载（当前账号）")
 @router.delete("/{task_id}",summary="删除消息任务")
 async def delete_message_task(
     task_id: str,

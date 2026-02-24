@@ -12,8 +12,10 @@ from .ai_profile import AIProfile
 from .ai_daily_usage import AIDailyUsage
 from .ai_publish_task import AIPublishTask
 from .ai_compose_result import AIComposeResult
+from .ai_compose_task import AIComposeTask
 from .wechat_auth import WechatAuth
 from .billing_order import BillingOrder
 from .analytics_event import AnalyticsEvent
+from .message_task_log import MessageTaskLog
 # 导入基础模型
 from .base import *

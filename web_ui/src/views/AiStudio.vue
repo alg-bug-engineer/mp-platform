@@ -210,13 +210,13 @@
 
             <template #actions="{ record }">
               <a-space>
-                <a-button type="text" :loading="runningKey === `analyze:${record.id}`" @click="handleModeAction('analyze', record)">
+                <a-button type="text" :loading="isActionRunning(`analyze:${record.id}`)" @click="handleModeAction('analyze', record)">
                   {{ modeActionLabel('analyze', record) }}
                 </a-button>
-                <a-button type="text" :loading="runningKey === `create:${record.id}`" @click="handleModeAction('create', record)">
+                <a-button type="text" :loading="isActionRunning(`create:${record.id}`)" @click="handleModeAction('create', record)">
                   {{ modeActionLabel('create', record) }}
                 </a-button>
-                <a-button type="text" :loading="runningKey === `rewrite:${record.id}`" @click="handleModeAction('rewrite', record)">
+                <a-button type="text" :loading="isActionRunning(`rewrite:${record.id}`)" @click="handleModeAction('rewrite', record)">
                   {{ modeActionLabel('rewrite', record) }}
                 </a-button>
               </a-space>
@@ -225,13 +225,48 @@
         </a-card>
 
         <a-card v-if="activeSection === 'drafts'" id="studio-drafts-card" title="草稿历史（本地草稿箱）" class="panel" :loading="draftLoading">
+          <a-space style="margin-bottom: 10px;" wrap>
+            <a-checkbox
+              :model-value="allDraftSelected"
+              :indeterminate="selectedDraftCount > 0 && !allDraftSelected"
+              @change="(v) => toggleSelectAllDrafts(!!v)"
+            >
+              全选
+            </a-checkbox>
+            <span class="muted">已选 {{ selectedDraftCount }} 条</span>
+            <a-button
+              size="small"
+              status="danger"
+              :disabled="selectedDraftCount === 0"
+              :loading="draftDeleting"
+              @click="removeSelectedDrafts"
+            >
+              批量删除
+            </a-button>
+          </a-space>
           <a-list :data="drafts">
             <template #item="{ item }">
               <a-list-item :id="`draft-item-${item.id}`" :class="{ 'active-draft-item': item.id === activeDraftId }">
                 <div style="width: 100%;">
                   <div class="draft-head">
-                    <a-link @click="openDraftDetail(item)">{{ item.title }}</a-link>
-                    <span class="muted">{{ item.created_at }}</span>
+                    <a-space>
+                      <a-checkbox
+                        :model-value="isDraftSelected(item.id)"
+                        @change="(v) => toggleDraftSelection(item.id, !!v)"
+                        @click.stop
+                      />
+                      <a-link @click="openDraftDetail(item)">{{ item.title }}</a-link>
+                    </a-space>
+                    <a-space>
+                      <a-tag :color="draftModeColor(item.mode)">{{ draftModeLabel(item.mode) }}</a-tag>
+                      <a-tag
+                        v-if="draftWechatStatusLabel(item)"
+                        :color="draftWechatStatusColor(item)"
+                      >
+                        {{ draftWechatStatusLabel(item) }}
+                      </a-tag>
+                      <span class="muted">{{ item.created_at }}</span>
+                    </a-space>
                   </div>
                   <div class="muted">文章ID：{{ item.article_id }} | 平台：{{ item.platform }}</div>
                 </div>
@@ -328,7 +363,7 @@
       <a-space direction="vertical" style="width: 100%;">
         <a-space wrap>
           <a-button @click="copyResult">复制结果文本</a-button>
-          <a-button :loading="runningKey === `${resultData.mode}:${resultData.article_id}`" @click="regenerateCurrentResult">
+          <a-button :loading="isActionRunning(`${resultData.mode}:${resultData.article_id}`)" @click="regenerateCurrentResult">
             {{ resultRegenerateLabel }}
           </a-button>
           <a-button type="primary" @click="openPublish">发布到草稿箱</a-button>
@@ -417,21 +452,41 @@
     <a-modal v-model:visible="draftDetailVisible" title="草稿详情" :footer="false" width="980px">
       <a-space direction="vertical" style="width: 100%;">
         <div class="draft-head">
-          <strong>{{ currentDraft?.title || '-' }}</strong>
+          <a-space>
+            <strong>{{ currentDraft?.title || '-' }}</strong>
+            <a-tag
+              v-if="currentDraft && draftWechatStatusLabel(currentDraft)"
+              :color="draftWechatStatusColor(currentDraft)"
+            >
+              {{ draftWechatStatusLabel(currentDraft) }}
+            </a-tag>
+          </a-space>
           <span class="muted">{{ currentDraft?.created_at || '' }}</span>
         </div>
         <div class="muted">
-          文章ID：{{ currentDraft?.article_id || '-' }} | 平台：{{ currentDraft?.platform || '-' }} | 模式：{{ currentDraft?.mode || '-' }}
+          文章ID：{{ currentDraft?.article_id || '-' }} | 平台：{{ currentDraft?.platform || '-' }} | 类型：{{ draftModeLabel(currentDraft?.mode || '') }}
         </div>
         <a-space wrap>
           <a-button size="small" @click="copyCurrentDraft">复制草稿</a-button>
           <a-button size="small" @click="toggleDraftEdit">{{ draftEditing ? '取消编辑' : '编辑草稿' }}</a-button>
           <a-button v-if="draftEditing" size="small" type="primary" :loading="draftSaving" @click="saveCurrentDraft">保存修改</a-button>
           <a-button size="small" type="primary" :loading="draftRegenerating" @click="regenerateCurrentDraft">重新生成</a-button>
-          <a-button size="small" type="outline" :loading="draftSyncing" @click="openDraftSync">同步到公众号草稿箱</a-button>
+          <a-button size="small" type="outline" :loading="draftSyncing" @click="openDraftSync">同步</a-button>
           <a-button size="small" status="danger" :loading="draftDeleting" @click="removeCurrentDraft">删除草稿</a-button>
         </a-space>
         <a-divider style="margin: 8px 0;" />
+        <div v-if="currentDraftDeliveryHistory.length" class="draft-delivery-log">
+          <div class="muted draft-delivery-title">同步日志</div>
+          <div v-for="(item, idx) in currentDraftDeliveryHistory" :key="`delivery-${idx}`" class="draft-delivery-item">
+            <a-space wrap size="small">
+              <a-tag :color="deliveryStatusColor(item.status)">{{ deliveryStatusLabel(item.status) }}</a-tag>
+              <span class="muted">{{ item.time || '-' }}</span>
+              <span v-if="item.source" class="muted">来源：{{ item.source }}</span>
+            </a-space>
+            <div class="draft-delivery-message">{{ item.message || '（无详细信息）' }}</div>
+            <pre v-if="deliveryExtraPreview(item)" class="draft-delivery-extra">{{ deliveryExtraPreview(item) }}</pre>
+          </div>
+        </div>
         <template v-if="draftEditing">
           <a-form layout="vertical">
             <a-form-item label="草稿标题">
@@ -530,7 +585,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, inject, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { Message, Modal } from '@arco-design/web-vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -544,14 +599,18 @@ import {
   getDrafts,
   updateDraft,
   deleteDraft,
+  deleteDraftBatch,
   syncDraftToWechat,
   publishDraft,
   generateInlineIllustration,
+  getComposeTask,
+  getComposeTasks,
   getPublishTasks,
   processPublishTasks,
   retryPublishTask,
   deletePublishTask,
   type AIComposeResult,
+  type ComposeTask,
   type DraftRecord,
   type PublishTask,
 } from '@/api/ai'
@@ -570,10 +629,15 @@ type SectionTab = {
   key: StudioSection
   label: string
 }
+type ComposeTaskContext = {
+  mode: ComposeMode
+  articleId: string
+  sourceTitle: string
+}
 const WECHAT_WHITELIST_REMINDER_NEVER_KEY = 'studio:wechat-whitelist-reminder:never'
 const DRAFT_LOOKUP_LIMIT = 200  // 匹配后端 API 最大限制 (le=200)
-const COMPOSE_TIMEOUT_POLL_RETRIES = 8
-const COMPOSE_TIMEOUT_POLL_INTERVAL_MS = 3000
+const COMPOSE_TASK_POLL_INTERVAL_MS = 1500
+const COMPOSE_TASK_POLL_MAX_RETRIES = 240
 
 const showAuthQrcode = inject<() => void>('showAuthQrcode')
 const globalWxAuthReady = inject<{ value: boolean } | null>('wxAuthReady', null)
@@ -585,7 +649,10 @@ const draftLoading = ref(false)
 const queueLoading = ref(false)
 const processingQueue = ref(false)
 const loading = ref(false)
-const runningKey = ref('')
+const runningActions = reactive<Record<string, boolean>>({})
+const composeTaskTimers = new Map<string, number>()
+const composeTaskAttempts = reactive<Record<string, number>>({})
+const composeTaskPollingLocks = new Set<string>()
 const runtimeSettings = ref({
   product_mode: 'all_free',
   is_all_free: true,
@@ -603,6 +670,7 @@ const overview = reactive<any>({
 })
 
 const drafts = ref<DraftRecord[]>([])
+const selectedDraftIds = ref<string[]>([])
 const publishQueue = ref<PublishTask[]>([])
 const articles = ref<any[]>([])
 const mps = ref<any[]>([])
@@ -652,7 +720,7 @@ const createForm = reactive({
   platform: 'wechat',
   style: '专业深度',
   length: 'medium',
-  image_count: 1,
+  image_count: 2,
   audience: '',
   tone: '',
   instruction: '',
@@ -758,9 +826,131 @@ const selectedDraftTextPreview = computed(() => {
   if (!text) return ''
   return text.length > 42 ? `${text.slice(0, 42)}...` : text
 })
+const selectedDraftCount = computed(() => selectedDraftIds.value.length)
+const allDraftSelected = computed(() => {
+  if (!drafts.value.length) return false
+  const selected = new Set(selectedDraftIds.value.map((id) => String(id || '').trim()).filter(Boolean))
+  if (!selected.size) return false
+  return drafts.value.every((item) => selected.has(String(item.id || '').trim()))
+})
 const renderDraftMarkdown = (content: string): string => {
   if (!content) return '<p style="color:var(--color-text-3)">暂无内容</p>'
   return marked.parse(content) as string
+}
+const draftDeliveryInfo = (draft: DraftRecord) => {
+  const metadata = (draft?.metadata || {}) as Record<string, any>
+  const delivery = (metadata.delivery || {}) as Record<string, any>
+  const wechat = (delivery.wechat || {}) as Record<string, any>
+  const status = String(wechat.status || '').trim().toLowerCase()
+  return {
+    status,
+    deliveredAt: String(wechat.delivered_at || wechat.last_try_at || ''),
+    message: String(wechat.message || ''),
+  }
+}
+type DraftDeliveryHistoryItem = {
+  status: string
+  message: string
+  time: string
+  source?: string
+  task_id?: string
+  extra?: Record<string, any>
+}
+const currentDraftDeliveryHistory = computed<DraftDeliveryHistoryItem[]>(() => {
+  const metadata = ((currentDraft.value?.metadata || {}) as Record<string, any>)
+  const delivery = (metadata.delivery || {}) as Record<string, any>
+  const wechat = (delivery.wechat || {}) as Record<string, any>
+  const history = Array.isArray(wechat.history) ? wechat.history : []
+  const rows = history
+    .map((item: any) => {
+      const row = (item || {}) as Record<string, any>
+      return {
+        status: String(row.status || '').trim().toLowerCase(),
+        message: String(row.message || ''),
+        time: String(row.time || ''),
+        source: String(row.source || ''),
+        task_id: String(row.task_id || ''),
+        extra: (row.extra && typeof row.extra === 'object') ? (row.extra as Record<string, any>) : undefined,
+      }
+    })
+    .filter((item: DraftDeliveryHistoryItem) => !!item.status || !!item.message || !!item.time)
+  if (rows.length) return rows
+  const fallbackDraft = currentDraft.value
+  if (!fallbackDraft) return []
+  const fallback = draftDeliveryInfo(fallbackDraft)
+  if (!fallback.status && !fallback.message && !fallback.deliveredAt) return []
+  return [
+    {
+      status: fallback.status,
+      message: fallback.message,
+      time: fallback.deliveredAt,
+      source: 'draft_delivery',
+    },
+  ]
+})
+const deliveryStatusLabel = (status: string) => {
+  const key = String(status || '').trim().toLowerCase()
+  if (key === 'success') return '成功'
+  if (key === 'failed') return '失败'
+  if (key === 'pending' || key === 'processing') return '处理中'
+  return '未知'
+}
+const deliveryStatusColor = (status: string) => {
+  const key = String(status || '').trim().toLowerCase()
+  if (key === 'success') return 'green'
+  if (key === 'failed') return 'red'
+  if (key === 'pending' || key === 'processing') return 'arcoblue'
+  return 'gray'
+}
+const deliveryExtraPreview = (item: DraftDeliveryHistoryItem) => {
+  const extra = item?.extra
+  if (!extra || typeof extra !== 'object') return ''
+  try {
+    const json = JSON.stringify(extra, null, 2)
+    return json.length > 800 ? `${json.slice(0, 800)}...` : json
+  } catch (_) {
+    return String(extra || '')
+  }
+}
+const draftModeLabel = (mode: string) => {
+  if (mode === 'analyze') return '分析'
+  if (mode === 'rewrite') return '仿写'
+  return '创作'
+}
+const draftModeColor = (mode: string) => {
+  if (mode === 'analyze') return 'orange'
+  if (mode === 'rewrite') return 'purple'
+  return 'arcoblue'
+}
+const draftWechatStatusLabel = (draft: DraftRecord) => {
+  const status = draftDeliveryInfo(draft).status
+  if (status === 'success') return '已投递微信公众号'
+  if (status === 'failed') return '公众号投递失败'
+  if (status === 'pending' || status === 'processing') return '公众号投递中'
+  return ''
+}
+const draftWechatStatusColor = (draft: DraftRecord) => {
+  const status = draftDeliveryInfo(draft).status
+  if (status === 'success') return 'green'
+  if (status === 'failed') return 'red'
+  if (status === 'pending' || status === 'processing') return 'arcoblue'
+  return 'gray'
+}
+const isDraftSelected = (draftId: string) => selectedDraftIds.value.includes(String(draftId || '').trim())
+const toggleDraftSelection = (draftId: string, checked: boolean) => {
+  const id = String(draftId || '').trim()
+  if (!id) return
+  const set = new Set(selectedDraftIds.value.map((item) => String(item || '').trim()).filter(Boolean))
+  if (checked) set.add(id)
+  else set.delete(id)
+  selectedDraftIds.value = Array.from(set)
+}
+const toggleSelectAllDrafts = (checked: boolean) => {
+  if (!checked) {
+    selectedDraftIds.value = []
+    return
+  }
+  selectedDraftIds.value = drafts.value.map((item) => String(item.id || '').trim()).filter(Boolean)
 }
 const activityDraftMax = computed(() =>
   Math.max(1, ...activityTrend.value.map((item: any) => Number(item?.drafts || 0)))
@@ -928,52 +1118,145 @@ const handleActionableError = (error: any) => {
   Message.error(msg)
 }
 
-const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
-
-const isComposeTimeoutError = (error: any) => {
-  const msg = String(error?.message || error || '').toLowerCase()
-  return msg.includes('timeout') || msg.includes('exceeded') || msg.includes('econnaborted')
+const composeModeLabel = (mode: ComposeMode) => {
+  if (mode === 'analyze') return '分析'
+  if (mode === 'rewrite') return '仿写'
+  return '创作'
 }
 
-const findDraftByArticleMode = (list: DraftRecord[], articleId: string, mode: ComposeMode) => {
-  const targetArticleId = String(articleId || '').trim()
-  const targetMode = String(mode || '').trim().toLowerCase()
-  if (!targetArticleId || !targetMode) return null
+const composeActionKey = (mode: ComposeMode, articleId: string) => `${mode}:${articleId}`
+const isActionRunning = (key: string) => !!runningActions[key]
+const setActionRunning = (key: string, running: boolean) => {
+  if (!key) return
+  if (running) {
+    runningActions[key] = true
+    return
+  }
+  delete runningActions[key]
+}
+
+const clearComposeTaskWatcher = (taskId: string) => {
+  const timer = composeTaskTimers.get(taskId)
+  if (typeof timer === 'number') {
+    window.clearInterval(timer)
+    composeTaskTimers.delete(taskId)
+  }
+  composeTaskPollingLocks.delete(taskId)
+  delete composeTaskAttempts[taskId]
+}
+
+const shouldAutoOpenComposeResult = (ctx: ComposeTaskContext) => {
+  if (!resultVisible.value) return true
   return (
-    (list || []).find(
-      (item) =>
-        String(item?.article_id || '').trim() === targetArticleId &&
-        String(item?.mode || '').trim().toLowerCase() === targetMode
-    ) || null
+    String(resultData.article_id || '').trim() === ctx.articleId &&
+    String(resultData.mode || '').trim().toLowerCase() === ctx.mode
   )
 }
 
-const tryRecoverDraftAfterTimeout = async (articleId: string, mode: ComposeMode) => {
-  Message.warning('请求等待超时，正在检查草稿箱是否已生成...')
-  for (let i = 0; i < COMPOSE_TIMEOUT_POLL_RETRIES; i++) {
-    if (i > 0) await sleep(COMPOSE_TIMEOUT_POLL_INTERVAL_MS)
-    const latestDrafts = await getDrafts(DRAFT_LOOKUP_LIMIT)
-    drafts.value = latestDrafts || []
-    const matched = findDraftByArticleMode(drafts.value, articleId, mode)
-    if (!matched) continue
-    openDraftDetail(matched)
-    await refreshOverview()
-    Message.success('后台已完成创作，已为你打开草稿')
-    return true
-  }
-  return false
-}
-
-const handleComposeRequestError = async (error: any, articleId: string, mode: ComposeMode) => {
-  if (!isComposeTimeoutError(error)) {
-    handleActionableError(error)
+const handleComposeTaskResolved = async (task: ComposeTask, ctx: ComposeTaskContext) => {
+  const status = String(task?.status || '').trim().toLowerCase()
+  if (status === 'success') {
+    const payload = task?.result_payload as AIComposeResult | undefined
+    if (payload?.result && shouldAutoOpenComposeResult(ctx)) {
+      fillResult(`${composeModeLabel(ctx.mode)}结果`, ctx.sourceTitle || payload.source_title || '', payload)
+      Message.success(`${composeModeLabel(ctx.mode)}任务已完成`)
+    } else {
+      Message.success(`${composeModeLabel(ctx.mode)}任务已完成，结果已保存到草稿箱`)
+    }
+    await Promise.all([refreshOverview(), fetchDrafts()])
     return
   }
+  const message = String(task?.error_message || task?.status_message || `${composeModeLabel(ctx.mode)}任务执行失败`)
+  Message.error(message)
+}
+
+const startComposeTaskPolling = (taskId: string, ctx: ComposeTaskContext) => {
+  const id = String(taskId || '').trim()
+  if (!id || composeTaskTimers.has(id)) return
+  composeTaskAttempts[id] = 0
+  const timer = window.setInterval(async () => {
+    if (composeTaskPollingLocks.has(id)) return
+    composeTaskPollingLocks.add(id)
+    try {
+      composeTaskAttempts[id] = Number(composeTaskAttempts[id] || 0) + 1
+      const task = await getComposeTask(id)
+      const status = String(task?.status || '').trim().toLowerCase()
+      if (status === 'pending' || status === 'processing') {
+        if (composeTaskAttempts[id] >= COMPOSE_TASK_POLL_MAX_RETRIES) {
+          clearComposeTaskWatcher(id)
+          Message.warning(`${composeModeLabel(ctx.mode)}任务仍在后台处理中，请稍后在草稿箱查看结果`)
+        }
+        return
+      }
+      clearComposeTaskWatcher(id)
+      await handleComposeTaskResolved(task, ctx)
+    } catch (error: any) {
+      if (composeTaskAttempts[id] >= COMPOSE_TASK_POLL_MAX_RETRIES) {
+        clearComposeTaskWatcher(id)
+        Message.warning(`${composeModeLabel(ctx.mode)}任务状态查询超时，请稍后在草稿箱刷新`)
+      }
+      if (String(error || '').includes('任务不存在')) {
+        clearComposeTaskWatcher(id)
+      }
+    } finally {
+      composeTaskPollingLocks.delete(id)
+    }
+  }, COMPOSE_TASK_POLL_INTERVAL_MS)
+  composeTaskTimers.set(id, timer)
+}
+
+const submitComposeTask = async (mode: ComposeMode, record: any, payload: Record<string, any>) => {
+  const articleId = String(record?.id || '').trim()
+  if (!articleId) {
+    Message.error('缺少文章ID，无法提交任务')
+    return
+  }
+  const actionKey = composeActionKey(mode, articleId)
+  setActionRunning(actionKey, true)
   try {
-    const recovered = await tryRecoverDraftAfterTimeout(articleId, mode)
-    if (recovered) return
-  } catch (_) {}
-  Message.warning('生成耗时较长，请稍后在草稿箱刷新查看结果')
+    const submit = mode === 'analyze'
+      ? await aiAnalyze(articleId, payload)
+      : (mode === 'create' ? await aiCreate(articleId, payload) : await aiRewrite(articleId, payload))
+    const task = submit?.task
+    if (!task?.id) {
+      setActionRunning(actionKey, false)
+      Message.error('任务提交失败，请稍后重试')
+      return
+    }
+    setActionRunning(actionKey, false)
+    const ahead = Math.max(0, Number(submit.queued_total || 0) - 1)
+    if (ahead > 0) {
+      Message.info(`${composeModeLabel(mode)}任务已入队，前方还有 ${ahead} 个任务`)
+    } else {
+      Message.info(`${composeModeLabel(mode)}任务已提交，正在处理中`)
+    }
+    startComposeTaskPolling(task.id, {
+      mode,
+      articleId,
+      sourceTitle: String(record?.title || resultSourceTitle.value || resultData.source_title || ''),
+    })
+  } catch (error: any) {
+    setActionRunning(actionKey, false)
+    await handleComposeRequestError(error, articleId, mode)
+  }
+}
+
+const recoverPendingComposeTasks = async () => {
+  const pendingTasks = await getComposeTasks({ status: 'pending,processing', limit: 50 })
+  for (const task of pendingTasks || []) {
+    const mode = String(task?.mode || '').trim().toLowerCase() as ComposeMode
+    const articleId = String(task?.article_id || '').trim()
+    if (!articleId || (mode !== 'analyze' && mode !== 'create' && mode !== 'rewrite')) continue
+    startComposeTaskPolling(String(task.id || ''), {
+      mode,
+      articleId,
+      sourceTitle: getArticleRecordById(articleId).title || '',
+    })
+  }
+}
+
+const handleComposeRequestError = async (error: any, _articleId: string, _mode: ComposeMode) => {
+  handleActionableError(error)
 }
 
 const openArticle = (id: string) => {
@@ -1009,6 +1292,8 @@ const fetchDrafts = async () => {
   draftLoading.value = true
   try {
     drafts.value = await getDrafts(DRAFT_LOOKUP_LIMIT)
+    const available = new Set((drafts.value || []).map((item) => String(item.id || '').trim()).filter(Boolean))
+    selectedDraftIds.value = selectedDraftIds.value.filter((id) => available.has(String(id || '').trim()))
     if (activeDraftId.value) {
       nextTick(() => scrollToActiveDraft('auto'))
     }
@@ -1221,6 +1506,34 @@ const removeCurrentDraft = async () => {
   })
 }
 
+const removeSelectedDrafts = async () => {
+  const ids = Array.from(new Set(selectedDraftIds.value.map((item) => String(item || '').trim()).filter(Boolean)))
+  if (!ids.length) {
+    Message.warning('请先选择草稿')
+    return
+  }
+  Modal.confirm({
+    title: '批量删除草稿',
+    content: `确认删除已选 ${ids.length} 条草稿吗？删除后不可恢复。`,
+    hideCancel: false,
+    onOk: async () => {
+      draftDeleting.value = true
+      try {
+        const resp = await deleteDraftBatch(ids)
+        if (currentDraft.value?.id && ids.includes(String(currentDraft.value.id || '').trim())) {
+          draftDetailVisible.value = false
+        }
+        selectedDraftIds.value = []
+        await fetchDrafts()
+        await refreshOverview()
+        Message.success(`已删除 ${resp.deleted || 0} 条草稿`)
+      } finally {
+        draftDeleting.value = false
+      }
+    },
+  })
+}
+
 const openDraftSync = () => {
   if (!currentDraft.value?.id) return
   draftSyncForm.title = currentDraft.value.title || ''
@@ -1252,36 +1565,20 @@ const regenerateCurrentDraft = async () => {
   if (mode === 'analyze' || mode === 'rewrite') {
     await runTask(mode as 'analyze' | 'rewrite', articleRecord, true)
   } else if (mode === 'create') {
-    // 对于创作模式，使用草稿的 metadata 中的选项
     const metadata = (currentDraft.value.metadata || {}) as Record<string, any>
     const options = metadata.options || {}
-
-    const key = `create:${articleId}`
-    runningKey.value = key
-    Message.info('正在重新创作，请稍候...')
-
-    try {
-      const payload = {
-        instruction: String(options.instruction || metadata.instruction || ''),
-        platform: String(options.platform || 'wechat'),
-        style: String(options.style || '专业深度'),
-        length: String(options.length || 'medium'),
-        image_count: Number(options.image_count ?? 1),
-        audience: String(options.audience || ''),
-        tone: String(options.tone || ''),
-        generate_images: Boolean(options.generate_images ?? true),
-        force_refresh: true,
-      }
-
-      const res = await aiCreate(articleId, payload)
-      fillResult('创作结果', articleRecord.title || '', res)
-      await refreshOverview()
-      await fetchDrafts()
-    } catch (e: any) {
-      await handleComposeRequestError(e, articleId, 'create')
-    } finally {
-      runningKey.value = ''
+    const payload = {
+      instruction: String(options.instruction || metadata.instruction || ''),
+      platform: String(options.platform || 'wechat'),
+      style: String(options.style || '专业深度'),
+      length: String(options.length || 'medium'),
+      image_count: Number(options.image_count ?? 2),
+      audience: String(options.audience || ''),
+      tone: String(options.tone || ''),
+      generate_images: Boolean(options.generate_images ?? true),
+      force_refresh: true,
     }
+    await submitComposeTask('create', articleRecord, payload)
   }
 }
 
@@ -1315,6 +1612,14 @@ const submitDraftSync = async () => {
       Message.success(resp.wechat.message || '已同步到公众号草稿箱')
     } else {
       Message.warning(resp.wechat?.message || '同步失败，已按策略进入重试')
+    }
+    if (resp.draft?.id) {
+      currentDraft.value = resp.draft
+    }
+    await fetchDrafts()
+    if (currentDraft.value?.id) {
+      const latest = drafts.value.find((item) => item.id === currentDraft.value?.id)
+      if (latest) currentDraft.value = latest
     }
     await fetchPublishQueue()
     await refreshOverview()
@@ -1376,32 +1681,18 @@ const fillResult = (title: string, sourceTitle: string, res: any) => {
 }
 
 const runTask = async (mode: 'analyze' | 'rewrite', record: any, forceRefresh: boolean = false) => {
-  const key = `${mode}:${record.id}`
-  runningKey.value = key
-  Message.info(
-    `${mode === 'analyze' ? (forceRefresh ? '正在重新分析' : '正在分析') : (forceRefresh ? '正在重新仿写' : '正在仿写')}，请稍候...`
-  )
-  try {
-    const payload = {
-      instruction: quickInstruction.value || '',
-      platform: createForm.platform,
-      style: createForm.style,
-      length: createForm.length,
-      image_count: 0,
-      audience: createForm.audience,
-      tone: createForm.tone,
-      generate_images: false,
-      force_refresh: forceRefresh,
-    }
-    const res = mode === 'analyze' ? await aiAnalyze(record.id, payload) : await aiRewrite(record.id, payload)
-    fillResult(mode === 'analyze' ? '分析结果' : '仿写结果', record.title || '', res)
-    await refreshOverview()
-    await fetchDrafts()
-  } catch (e: any) {
-    await handleComposeRequestError(e, String(record?.id || ''), mode)
-  } finally {
-    runningKey.value = ''
+  const payload = {
+    instruction: quickInstruction.value || '',
+    platform: createForm.platform,
+    style: createForm.style,
+    length: createForm.length,
+    image_count: 0,
+    audience: createForm.audience,
+    tone: createForm.tone,
+    generate_images: false,
+    force_refresh: forceRefresh,
   }
+  await submitComposeTask(mode, record, payload)
 }
 
 const openCreate = (record: any) => {
@@ -1429,31 +1720,19 @@ const submitCreate = async () => {
     return
   }
   const record = currentCreateArticle.value
-  const key = `create:${record.id}`
-  runningKey.value = key
   createVisible.value = false
-  Message.info('正在生成图文稿件，请稍候...')
-  try {
-    const payload = {
-      instruction: createForm.instruction,
-      platform: createForm.platform,
-      style: createForm.style,
-      length: createForm.length,
-      image_count: createForm.image_count,
-      audience: createForm.audience,
-      tone: createForm.tone,
-      generate_images: createForm.generate_images,
-      force_refresh: false,
-    }
-    const res = await aiCreate(record.id, payload)
-    fillResult('创作结果', record.title || '', res)
-    await refreshOverview()
-    await fetchDrafts()
-  } catch (e: any) {
-    await handleComposeRequestError(e, String(record?.id || ''), 'create')
-  } finally {
-    runningKey.value = ''
+  const payload = {
+    instruction: createForm.instruction,
+    platform: createForm.platform,
+    style: createForm.style,
+    length: createForm.length,
+    image_count: createForm.image_count,
+    audience: createForm.audience,
+    tone: createForm.tone,
+    generate_images: createForm.generate_images,
+    force_refresh: false,
   }
+  await submitComposeTask('create', record, payload)
 }
 
 const getArticleRecordById = (articleId: string) => {
@@ -1472,7 +1751,7 @@ const createPayloadFromResultOptions = (forceRefresh: boolean) => {
     platform: String(opts.platform || createForm.platform || 'wechat'),
     style: String(opts.style || createForm.style || '专业深度'),
     length: String(opts.length || createForm.length || 'medium'),
-    image_count: Number(opts.image_count ?? createForm.image_count ?? 1),
+    image_count: Number(opts.image_count ?? createForm.image_count ?? 2),
     audience: String(opts.audience || createForm.audience || ''),
     tone: String(opts.tone || createForm.tone || ''),
     generate_images: Boolean(opts.generate_images ?? createForm.generate_images),
@@ -1492,21 +1771,8 @@ const regenerateCurrentResult = async () => {
     await runTask(mode as 'analyze' | 'rewrite', getArticleRecordById(articleId), true)
     return
   }
-
-  const key = `create:${articleId}`
-  runningKey.value = key
-  Message.info('正在重新创作，请稍候...')
-  try {
-    const payload = createPayloadFromResultOptions(true)
-    const res = await aiCreate(articleId, payload)
-    fillResult('创作结果', resultSourceTitle.value || resultData.source_title || '', res)
-    await refreshOverview()
-    await fetchDrafts()
-  } catch (e: any) {
-    await handleComposeRequestError(e, articleId, 'create')
-  } finally {
-    runningKey.value = ''
-  }
+  const payload = createPayloadFromResultOptions(true)
+  await submitComposeTask('create', getArticleRecordById(articleId), payload)
 }
 
 const captureResultSelection = () => {
@@ -1832,7 +2098,19 @@ onMounted(async () => {
   await loadComposeMeta()
   await fetchMps()
   await refreshAll()
+  try {
+    await recoverPendingComposeTasks()
+  } catch (_) {}
   restoreFromRouteQuery()
+})
+
+onUnmounted(() => {
+  for (const timer of composeTaskTimers.values()) {
+    window.clearInterval(timer)
+  }
+  composeTaskTimers.clear()
+  composeTaskPollingLocks.clear()
+  Object.keys(runningActions).forEach((key) => delete runningActions[key])
 })
 </script>
 
@@ -2180,6 +2458,41 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.draft-delivery-log {
+  border: 1px solid var(--color-border-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--color-fill-1);
+}
+
+.draft-delivery-title {
+  margin-bottom: 8px;
+}
+
+.draft-delivery-item + .draft-delivery-item {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--color-border-2);
+}
+
+.draft-delivery-message {
+  margin-top: 4px;
+  line-height: 1.6;
+  color: var(--color-text-2);
+}
+
+.draft-delivery-extra {
+  margin-top: 6px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 6px;
+  background: #f7f8fa;
+  border: 1px solid var(--color-border-2);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .whitelist-ip-list {

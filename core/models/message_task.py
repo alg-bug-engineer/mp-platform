@@ -25,6 +25,12 @@ class MessageTask(Base):
     mps_id = Column(Text, nullable=False)
     # 定义 cron_exp 表达式
     cron_exp=Column(String(100),nullable='* * 1 * *')
+    # 自动创作并同步到平台（当前仅支持微信公众号草稿箱）
+    auto_compose_sync_enabled = Column(Integer, default=0)
+    auto_compose_platform = Column(String(32), default="wechat")
+    auto_compose_instruction = Column(Text, default="")
+    auto_compose_last_article_id = Column(String(255), default="")
+    auto_compose_last_sync_at = Column(DateTime, nullable=True)
     # 定义任务状态字段，默认值为 pending
     status = Column(Integer, default=0)
     # 定义创建时间字段，默认值为当前 UTC 时间

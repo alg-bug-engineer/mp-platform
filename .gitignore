@@ -12,6 +12,7 @@ dock_build.bat
 item
 static/cache
 static/wx_qrcode.png
+static/assets/
 data
 build
 dist

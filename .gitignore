@@ -13,6 +13,9 @@ item
 static/cache
 static/wx_qrcode.png
 static/assets/
+static/index.html
+web_ui/dist/
+run/
 data
 build
 dist

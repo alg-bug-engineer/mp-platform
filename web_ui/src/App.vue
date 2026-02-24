@@ -163,7 +163,7 @@ const nodes: NavNode[] = [
 
   { key: 'ops-msg', label: '消息任务', hint: '任务队列', path: '/workspace/ops/messages', group: 'ops', icon: IconMessage, prefix: true },
   { key: 'ops-tags', label: '标签管理', hint: '内容分类', path: '/workspace/ops/tags', group: 'ops', icon: IconTag, prefix: true },
-  { key: 'ops-config', label: '系统配置', hint: '系统参数', path: '/workspace/ops/configs', group: 'ops', icon: IconSettings, prefix: true },
+  { key: 'ops-config', label: '系统配置', hint: '系统参数', path: '/workspace/ops/configs', group: 'ops', icon: IconSettings, adminOnly: true, prefix: true },
 
   { key: 'account-profile', label: '个人中心', hint: '账号信息', path: '/edit-user', group: 'account', icon: IconUser },
   { key: 'account-password', label: '修改密码', hint: '安全设置', path: '/change-password', group: 'account', icon: IconLock },

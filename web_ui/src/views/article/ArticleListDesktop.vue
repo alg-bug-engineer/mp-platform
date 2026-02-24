@@ -47,14 +47,16 @@
         <a-page-header :title="activeFeed ? activeFeed.name : '全部'" :subtitle="'管理您的内容池文章'" :show-back="false">
           <template #extra>
             <a-space class="header-actions" wrap>
-              <span style="font-size: 12px; color: var(--color-text-3);">{{ issourceUrl ? '原链接' : '内链' }}</span>
-              <a-switch 
-                v-model="issourceUrl" 
-                size="small" 
-                style="margin: 0 8px;">
-              </a-switch>
+              <template v-if="isAdmin">
+                <span style="font-size: 12px; color: var(--color-text-3);">{{ issourceUrl ? '原链接' : '内链' }}</span>
+                <a-switch 
+                  v-model="issourceUrl" 
+                  size="small" 
+                  style="margin: 0 8px;">
+                </a-switch>
+              </template>
 
-              <a-button  @click="handleExportShow()">
+              <a-button v-if="isAdmin" @click="handleExportShow()">
                 <template #icon><icon-export /></template>
                 导出
               </a-button>
@@ -63,7 +65,7 @@
                 <template #icon><icon-refresh /></template>
                 刷新
               </a-button>
-              <a-dropdown>
+              <a-dropdown v-if="isAdmin">
                 <a-button v-if="activeFeed?.id == ''">
                   <template #icon><icon-delete /></template>
                   清理
@@ -80,7 +82,7 @@
                   </a-doption>
                 </template>
               </a-dropdown>
-              <a-button @click="handleAuthClick">
+              <a-button v-if="isAdmin" @click="handleAuthClick">
                 <template #icon><icon-scan /></template>
                 刷新授权
               </a-button>
@@ -198,6 +200,7 @@ import { Message, Modal } from '@arco-design/web-vue'
 import { formatDateTime, formatTimestamp } from '@/utils/date'
 import router from '@/router'
 import { deleteMpApi } from '@/api/subscription'
+import { getCurrentUser } from '@/api/auth'
 import TextIcon from '@/components/TextIcon.vue'
 import { ProxyImage } from '@/utils/constants'
 
@@ -220,6 +223,7 @@ const mpPagination = ref({
 const searchText = ref('')
 const filterStatus = ref('')
 const mpSearchText = ref('')
+const isAdmin = ref(false)
 
 const pagination = ref({
   current: 1,
@@ -588,6 +592,14 @@ const showAddModal = () => {
 const handleAddSuccess = () => {
   fetchArticles()
 }
+const loadCurrentUserRole = async () => {
+  try {
+    const user = await getCurrentUser()
+    isAdmin.value = String(user?.role || '').toLowerCase() === 'admin'
+  } catch (_) {
+    isAdmin.value = false
+  }
+}
 const processedContent = (record: any) => {
   return ProxyImage(record.content || '')
 }
@@ -711,7 +723,7 @@ const handleExportShow = async () => {
 onMounted(() => {
   console.log('组件挂载，开始获取数据')
   initIssourceUrl() // 初始化 issourceUrl 值
-  fetchMpList().then(() => {
+  loadCurrentUserRole().then(() => fetchMpList()).then(() => {
     console.log('公众号列表获取完成')
     fetchArticles()
   }).catch(err => {

@@ -74,7 +74,7 @@ const routes = [
         component: ConfigList,
         meta: { 
           requiresAuth: true,
-          permissions: ['config:view'] 
+          permissions: ['admin'] 
         }
       },
       {
@@ -93,7 +93,7 @@ const routes = [
         props: true,
         meta: { 
           requiresAuth: true,
-          permissions: ['config:view'] 
+          permissions: ['admin'] 
         }
       },
       {

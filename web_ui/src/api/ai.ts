@@ -1,5 +1,16 @@
 import http from './http'
 
+const resolveComposeTimeoutMs = () => {
+  const raw = Number(import.meta.env.VITE_AI_COMPOSE_TIMEOUT_MS || 300000)
+  if (!Number.isFinite(raw) || raw <= 0) return 300000
+  return Math.max(10000, raw)
+}
+
+const AI_COMPOSE_TIMEOUT_MS = resolveComposeTimeoutMs()
+const composeRequestConfig = () => ({
+  timeout: AI_COMPOSE_TIMEOUT_MS,
+})
+
 export interface AIProfile {
   provider_name: string
   model_name: string
@@ -213,15 +224,15 @@ export const recommendTags = (items: Array<{ article_id: string; title: string }
 }
 
 export const aiAnalyze = (articleId: string, payload: AIComposePayload = {}) => {
-  return http.post<AIComposeResult>(`/wx/ai/articles/${articleId}/analyze`, payload)
+  return http.post<AIComposeResult>(`/wx/ai/articles/${articleId}/analyze`, payload, composeRequestConfig())
 }
 
 export const aiCreate = (articleId: string, payload: AIComposePayload = {}) => {
-  return http.post<AIComposeResult>(`/wx/ai/articles/${articleId}/create`, payload)
+  return http.post<AIComposeResult>(`/wx/ai/articles/${articleId}/create`, payload, composeRequestConfig())
 }
 
 export const aiRewrite = (articleId: string, payload: AIComposePayload = {}) => {
-  return http.post<AIComposeResult>(`/wx/ai/articles/${articleId}/rewrite`, payload)
+  return http.post<AIComposeResult>(`/wx/ai/articles/${articleId}/rewrite`, payload, composeRequestConfig())
 }
 
 export interface InlineIllustrationPayload {

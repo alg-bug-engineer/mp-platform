@@ -572,6 +572,8 @@ type SectionTab = {
 }
 const WECHAT_WHITELIST_REMINDER_NEVER_KEY = 'studio:wechat-whitelist-reminder:never'
 const DRAFT_LOOKUP_LIMIT = 200  // 匹配后端 API 最大限制 (le=200)
+const COMPOSE_TIMEOUT_POLL_RETRIES = 8
+const COMPOSE_TIMEOUT_POLL_INTERVAL_MS = 3000
 
 const showAuthQrcode = inject<() => void>('showAuthQrcode')
 const globalWxAuthReady = inject<{ value: boolean } | null>('wxAuthReady', null)
@@ -926,6 +928,54 @@ const handleActionableError = (error: any) => {
   Message.error(msg)
 }
 
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
+
+const isComposeTimeoutError = (error: any) => {
+  const msg = String(error?.message || error || '').toLowerCase()
+  return msg.includes('timeout') || msg.includes('exceeded') || msg.includes('econnaborted')
+}
+
+const findDraftByArticleMode = (list: DraftRecord[], articleId: string, mode: ComposeMode) => {
+  const targetArticleId = String(articleId || '').trim()
+  const targetMode = String(mode || '').trim().toLowerCase()
+  if (!targetArticleId || !targetMode) return null
+  return (
+    (list || []).find(
+      (item) =>
+        String(item?.article_id || '').trim() === targetArticleId &&
+        String(item?.mode || '').trim().toLowerCase() === targetMode
+    ) || null
+  )
+}
+
+const tryRecoverDraftAfterTimeout = async (articleId: string, mode: ComposeMode) => {
+  Message.warning('请求等待超时，正在检查草稿箱是否已生成...')
+  for (let i = 0; i < COMPOSE_TIMEOUT_POLL_RETRIES; i++) {
+    if (i > 0) await sleep(COMPOSE_TIMEOUT_POLL_INTERVAL_MS)
+    const latestDrafts = await getDrafts(DRAFT_LOOKUP_LIMIT)
+    drafts.value = latestDrafts || []
+    const matched = findDraftByArticleMode(drafts.value, articleId, mode)
+    if (!matched) continue
+    openDraftDetail(matched)
+    await refreshOverview()
+    Message.success('后台已完成创作，已为你打开草稿')
+    return true
+  }
+  return false
+}
+
+const handleComposeRequestError = async (error: any, articleId: string, mode: ComposeMode) => {
+  if (!isComposeTimeoutError(error)) {
+    handleActionableError(error)
+    return
+  }
+  try {
+    const recovered = await tryRecoverDraftAfterTimeout(articleId, mode)
+    if (recovered) return
+  } catch (_) {}
+  Message.warning('生成耗时较长，请稍后在草稿箱刷新查看结果')
+}
+
 const openArticle = (id: string) => {
   window.open(`/views/article/${id}?auto_fetch=1`, '_blank')
 }
@@ -1228,7 +1278,7 @@ const regenerateCurrentDraft = async () => {
       await refreshOverview()
       await fetchDrafts()
     } catch (e: any) {
-      handleActionableError(e)
+      await handleComposeRequestError(e, articleId, 'create')
     } finally {
       runningKey.value = ''
     }
@@ -1348,7 +1398,7 @@ const runTask = async (mode: 'analyze' | 'rewrite', record: any, forceRefresh: b
     await refreshOverview()
     await fetchDrafts()
   } catch (e: any) {
-    handleActionableError(e)
+    await handleComposeRequestError(e, String(record?.id || ''), mode)
   } finally {
     runningKey.value = ''
   }
@@ -1400,7 +1450,7 @@ const submitCreate = async () => {
     await refreshOverview()
     await fetchDrafts()
   } catch (e: any) {
-    handleActionableError(e)
+    await handleComposeRequestError(e, String(record?.id || ''), 'create')
   } finally {
     runningKey.value = ''
   }
@@ -1453,7 +1503,7 @@ const regenerateCurrentResult = async () => {
     await refreshOverview()
     await fetchDrafts()
   } catch (e: any) {
-    handleActionableError(e)
+    await handleComposeRequestError(e, articleId, 'create')
   } finally {
     runningKey.value = ''
   }

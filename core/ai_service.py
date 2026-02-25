@@ -2105,8 +2105,8 @@ def _safe_wechat_title(raw_title: str) -> str:
     # 压缩多个空格为单个空格
     title = re.sub(r'\s+', ' ', title).strip()
 
-    # 2. 截断字节长度（50 bytes 是保守值，避免不同公众号的严格限制）
-    title = _trim_utf8_bytes(title, max_bytes=50)
+    # 2. 截断字节长度（150 bytes，放宽限制）
+    title = _trim_utf8_bytes(title, max_bytes=150)
 
     # 3. 确保有有效标题
     return title or "未命名草稿"

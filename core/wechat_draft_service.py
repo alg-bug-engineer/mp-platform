@@ -21,7 +21,7 @@ class WeChatDraftService:
     # 微信限制
     MAX_ARTICLE_IMG_SIZE = 1 * 1024 * 1024   # 正文图片 1MB
     MAX_COVER_IMG_SIZE = 9 * 1024 * 1024     # 封面图片 9MB
-    MAX_TITLE_BYTES = 50  # 标题字节限制（保守值，避免 errcode=45003）
+    MAX_TITLE_BYTES = 150  # 标题字节限制（放宽到150字节）
 
     def __init__(self, app_id: str, app_secret: str, owner_id: str):
         """

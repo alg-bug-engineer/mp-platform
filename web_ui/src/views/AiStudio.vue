@@ -471,8 +471,8 @@
           <a-button size="small" @click="toggleDraftEdit">{{ draftEditing ? '取消编辑' : '编辑草稿' }}</a-button>
           <a-button v-if="draftEditing" size="small" type="primary" :loading="draftSaving" @click="saveCurrentDraft">保存修改</a-button>
           <a-button size="small" type="primary" :loading="draftRegenerating" @click="regenerateCurrentDraft">重新生成</a-button>
-          <a-button size="small" type="outline" :loading="draftSyncing" @click="openDraftSync">同步</a-button>
-          <a-button size="small" status="danger" :loading="draftDeleting" @click="removeCurrentDraft">删除草稿</a-button>
+          <a-button size="small" type="outline" :loading="draftSyncing" @click="openDraftSync">同步到公众号</a-button>
+          <a-button size="small" status="danger" :loading="draftDeleting" @click="removeCurrentDraft">删除</a-button>
         </a-space>
         <a-divider style="margin: 8px 0;" />
         <div v-if="currentDraftDeliveryHistory.length" class="draft-delivery-log">

@@ -569,17 +569,24 @@ def _run_csdn_publish_sync(task: MessageTask, mp: Feed) -> str:
             },
         )
 
-        if success:
+        # ── 9. 记录推送结果（无论成功与否都记录文章ID，避免无限重试）──
+        # 注意：只有认证失败(needs_reauth)时不记录，其他情况都记录以便跳过
+        should_record = success or not needs_reauth
+        
+        if should_record and article_id_str:
             new_ids = list(csdn_published_ids)
-            if article_id_str and article_id_str not in new_ids:
+            if article_id_str not in new_ids:
                 new_ids.append(article_id_str)
-            session.query(MessageTaskModel).filter(
-                MessageTaskModel.id == str(task.id or ""),
-                MessageTaskModel.owner_id == owner_id,
-            ).update(
-                {MessageTaskModel.csdn_published_ids: _json.dumps(new_ids, ensure_ascii=False)},
-                synchronize_session=False,
-            )
+                session.query(MessageTaskModel).filter(
+                    MessageTaskModel.id == str(task.id or ""),
+                    MessageTaskModel.owner_id == owner_id,
+                ).update(
+                    {MessageTaskModel.csdn_published_ids: _json.dumps(new_ids, ensure_ascii=False)},
+                    synchronize_session=False,
+                )
+                logger.info("任务(%s)[%s] 已记录文章到 csdn_published_ids: %s", task.id, mp.mp_name, article_id_str)
+
+        if success:
             msg = f"CSDN 推送成功：《{title[:40]}》  {push_msg}"
             log_event(logger, E.CSDN_PUSH_COMPLETE, task_id=str(task.id or ""), mp=mp.mp_name,
                       title=title[:50], detail=push_msg[:120], draft_id=str(local_draft.get("id") or "")[:8])
@@ -599,17 +606,19 @@ def _run_csdn_publish_sync(task: MessageTask, mp: Feed) -> str:
             log_event(logger, E.CSDN_PUSH_FAIL, task_id=str(task.id or ""), mp=mp.mp_name,
                       title=title[:50], reason=push_msg[:200], draft_id=str(local_draft.get("id") or "")[:8])
             logger.warning("任务(%s)[%s] %s", task.id, mp.mp_name, msg)
-            try:
-                create_notice(
-                    session=session,
-                    owner_id=owner_id,
-                    title=f"CSDN 推送失败：{title[:40]}",
-                    content=f"{msg}\n草稿ID: {str(local_draft.get('id') or '')[:8]}",
-                    notice_type="task",
-                    ref_id=str(local_draft.get("id") or ""),
-                )
-            except Exception:
-                pass
+            # 只有非认证失败时才发通知（认证失败已在前面处理）
+            if not needs_reauth:
+                try:
+                    create_notice(
+                        session=session,
+                        owner_id=owner_id,
+                        title=f"CSDN 推送失败：{title[:40]}",
+                        content=f"{msg}\n草稿ID: {str(local_draft.get('id') or '')[:8]}\n提示：文章已记录，不会立即重试",
+                        notice_type="task",
+                        ref_id=str(local_draft.get("id") or ""),
+                    )
+                except Exception:
+                    pass
 
         session.commit()
         return msg
@@ -801,9 +810,14 @@ def do_job(mp=None,task:MessageTask=None):
             if auto_msg:
                 logs.append(f"自动创作同步: {auto_msg}")
 
-            csdn_msg = _run_csdn_publish_sync(task=task, mp=mp)
-            if csdn_msg:
-                logs.append(f"CSDN推送: {csdn_msg}")
+            # CSDN 推送（仅在启用时执行）
+            csdn_enabled = int(getattr(task, "csdn_publish_enabled", 0) or 0)
+            if csdn_enabled == 1:
+                csdn_msg = _run_csdn_publish_sync(task=task, mp=mp)
+                if csdn_msg:
+                    logs.append(f"CSDN推送: {csdn_msg}")
+            else:
+                logger.debug("任务(%s)[%s] CSDN 推送未启用，跳过", task.id, mp.mp_name)
 
             ended_at = datetime.now()
             duration = (ended_at - started_at).total_seconds()

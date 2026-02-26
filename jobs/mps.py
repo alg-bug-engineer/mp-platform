@@ -407,15 +407,22 @@ def _run_csdn_publish_sync(task: MessageTask, mp: Feed) -> str:
             task.id, mp.mp_name, article_id_str, title[:50], len(source_content),
         )
 
-        # ── 3. AI 创作（与用户在任务配置中设置的创作指令保持一致，默认配图 2 张）──
+        # ── 3. AI 创作（配图 2 张，基于即梦生成）──
         from core.models.user import User as DBUser
         from core.ai_service import (
             build_prompt,
+            build_image_prompts,
             call_openai_compatible,
+            extract_first_image_url_from_text,
+            generate_images_with_jimeng,
             get_or_create_profile,
+            merge_image_urls_into_markdown,
             refine_draft,
+            save_local_draft,
+            mark_local_draft_delivery,
         )
         from core.plan_service import consume_ai_usage, validate_ai_action
+        from core.image_service import ImageService
 
         user = session.query(DBUser).filter(DBUser.username == owner_id).first()
         if not user:
@@ -423,7 +430,7 @@ def _run_csdn_publish_sync(task: MessageTask, mp: Feed) -> str:
             logger.error("任务(%s)[%s] %s", task.id, mp.mp_name, msg)
             return msg
 
-        can_run, reason, _ = validate_ai_action(user, mode="create", publish_to_wechat=True)
+        can_run, reason, _ = validate_ai_action(user, mode="create", image_count=2)
         if not can_run:
             msg = f"CSDN AI 创作被拦截: {reason}"
             logger.warning("任务(%s)[%s] %s", task.id, mp.mp_name, msg)
@@ -435,10 +442,10 @@ def _run_csdn_publish_sync(task: MessageTask, mp: Feed) -> str:
             "platform": "csdn",
             "style": "专业深度",
             "length": "medium",
-            "image_count": 0,       # CSDN 不插入图片 URL（外部图床无法转存），图片用文字标注代替
+            "image_count": 2,       # 生成 2 张配图
             "audience": "",
             "tone": "",
-            "generate_images": False,
+            "generate_images": True,
         }
         log_event(logger, E.AI_COMPOSE_START, task_id=str(task.id or ""), mp=mp.mp_name,
                   article=str(article.title or "")[:50], platform="csdn")
@@ -458,33 +465,74 @@ def _run_csdn_publish_sync(task: MessageTask, mp: Feed) -> str:
             create_options=create_options,
             instruction=instruction,
         )
-        consume_ai_usage(user, image_count=0)
         logger.info(
             "任务(%s)[%s] CSDN AI 创作完成，创作后内容长度: %d 字符",
             task.id, mp.mp_name, len(draft_text),
         )
 
-        # ── 4. 剥离外部图片链接（CSDN 无法转存外部图床，会导致转存失败或丢图）──
-        import re as _re
-        def _strip_external_images(text: str) -> str:
-            """将 ![alt](url) 替换为纯文字标注，避免 CSDN 转存失败。"""
-            return _re.sub(
-                r'!\[([^\]]*)\]\([^\)]+\)',
-                lambda m: f'【图：{m.group(1).strip() or "配图"}】' if m.group(1).strip() else '',
-                text,
+        # ── 4. 生成配图（基于即梦）并嵌入到内容中 ──
+        image_urls: list = []
+        image_notice = ""
+        try:
+            prompts = build_image_prompts(
+                title=article.title or "",
+                platform="csdn",
+                style="专业深度",
+                image_count=2,
+                content=draft_text,
             )
-        draft_text_clean = _strip_external_images(draft_text)
-        if draft_text_clean != draft_text:
-            logger.info(
-                "任务(%s)[%s] 已剥离 CSDN 外部图片链接，内容长度 %d → %d",
-                task.id, mp.mp_name, len(draft_text), len(draft_text_clean),
-            )
+            if prompts:
+                image_urls, image_notice = generate_images_with_jimeng(prompts)
+                if image_urls:
+                    # 将图片 URL 合并到 Markdown 中
+                    draft_text = merge_image_urls_into_markdown(draft_text, image_urls)
+                    logger.info(
+                        "任务(%s)[%s] 即梦生图成功，生成 %d 张配图",
+                        task.id, mp.mp_name, len(image_urls),
+                    )
+                else:
+                    logger.warning("任务(%s)[%s] 即梦生图失败: %s", task.id, mp.mp_name, image_notice)
+        except Exception as e:
+            logger.warning("任务(%s)[%s] 生图异常: %s", task.id, mp.mp_name, e)
 
-        # ── 5. 推送创作后的内容到 CSDN ──
+        # ── 5. 保存到本地草稿箱 ──
+        cover_url = extract_first_image_url_from_text(draft_text) if image_urls else ""
+        local_draft = save_local_draft(
+            owner_id=owner_id,
+            article_id=str(article.id or ""),
+            title=str(article.title or "AI 创作草稿").strip(),
+            content=draft_text,
+            platform="csdn",
+            mode="create",
+            metadata={
+                "digest": "",
+                "author": "",
+                "cover_url": cover_url,
+                "instruction": instruction,
+                "options": create_options,
+                "image_urls": image_urls,
+                "image_notice": image_notice,
+                "source": "message_task_csdn",
+                "message_task_id": str(task.id or ""),
+                "feed_id": str(getattr(mp, "id", "") or ""),
+            },
+        )
+        logger.info(
+            "任务(%s)[%s] CSDN 草稿已保存，draft_id=%s",
+            task.id, mp.mp_name, str(local_draft.get("id") or "")[:8],
+        )
+
+        # ── 6. 推送创作后的内容到 CSDN ──
+        # 保留完整的 Markdown 内容（含图片链接），由 CSDN 编辑器处理
+        consume_ai_usage(user, image_count=len(image_urls))
         log_event(logger, E.CSDN_PUSH_START, task_id=str(task.id or ""), mp=mp.mp_name,
-                  title=title[:50], content_len=len(draft_text_clean))
+                  title=title[:50], content_len=len(draft_text), has_images=len(image_urls) > 0)
         from jobs.csdn_publish import push_to_csdn
-        success, push_msg, needs_reauth = push_to_csdn(storage_state, title, draft_text_clean)
+        success, push_msg, needs_reauth = push_to_csdn(
+            storage_state, title, draft_text,
+            tags=["人工智能", "大模型", "AI"],
+            fans_only=True,
+        )
 
         # 登录态失效 → 标记过期 + 站内信提醒用户重新扫码
         if needs_reauth:
@@ -504,6 +552,23 @@ def _run_csdn_publish_sync(task: MessageTask, mp: Feed) -> str:
             return f"CSDN 登录态失效，请重新扫码：{push_msg}"
 
         from core.models.message_task import MessageTask as MessageTaskModel
+
+        # ── 8. 标记草稿投递状态 ──
+        mark_local_draft_delivery(
+            owner_id=owner_id,
+            draft_id=str(local_draft.get("id") or ""),
+            platform="csdn",
+            status="success" if success else "failed",
+            message=push_msg,
+            source="message_task_csdn",
+            task_id=str(task.id or ""),
+            extra={
+                "article_id": article_id_str,
+                "has_images": len(image_urls) > 0,
+                "image_count": len(image_urls),
+            },
+        )
+
         if success:
             new_ids = list(csdn_published_ids)
             if article_id_str and article_id_str not in new_ids:
@@ -517,31 +582,31 @@ def _run_csdn_publish_sync(task: MessageTask, mp: Feed) -> str:
             )
             msg = f"CSDN 推送成功：《{title[:40]}》  {push_msg}"
             log_event(logger, E.CSDN_PUSH_COMPLETE, task_id=str(task.id or ""), mp=mp.mp_name,
-                      title=title[:50], detail=push_msg[:120])
+                      title=title[:50], detail=push_msg[:120], draft_id=str(local_draft.get("id") or "")[:8])
             try:
                 create_notice(
                     session=session,
                     owner_id=owner_id,
                     title=f"CSDN 推送成功：{title[:50]}",
-                    content=push_msg,
+                    content=f"{push_msg}\n草稿ID: {str(local_draft.get('id') or '')[:8]}",
                     notice_type="task",
-                    ref_id=article_id_str,
+                    ref_id=str(local_draft.get("id") or ""),
                 )
             except Exception:
                 pass
         else:
             msg = f"CSDN 推送失败：{push_msg}"
             log_event(logger, E.CSDN_PUSH_FAIL, task_id=str(task.id or ""), mp=mp.mp_name,
-                      title=title[:50], reason=push_msg[:200])
+                      title=title[:50], reason=push_msg[:200], draft_id=str(local_draft.get("id") or "")[:8])
             logger.warning("任务(%s)[%s] %s", task.id, mp.mp_name, msg)
             try:
                 create_notice(
                     session=session,
                     owner_id=owner_id,
                     title=f"CSDN 推送失败：{title[:40]}",
-                    content=msg,
+                    content=f"{msg}\n草稿ID: {str(local_draft.get('id') or '')[:8]}",
                     notice_type="task",
-                    ref_id=article_id_str,
+                    ref_id=str(local_draft.get("id") or ""),
                 )
             except Exception:
                 pass

@@ -31,6 +31,7 @@ class User(Base):
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
     faker_id = Column(String(255))
+    csdn_cookies = Column(Text, nullable=True)  # 用户CSDN cookies JSON串
 
     def verify_password(self, password: str) -> bool:
         """验证密码"""

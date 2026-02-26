@@ -8,6 +8,8 @@ from schemas.tags import Tags, TagsCreate
 from .base import success_response, error_response
 from core.auth import get_current_user, requires_permission
 from core.cache import clear_cache_pattern
+from core.log import get_logger
+logger = get_logger(__name__)
 
 # 标签管理API路由
 # 提供标签的增删改查功能
@@ -91,8 +93,7 @@ async def create_tag(tag: TagsCreate, db: Session = Depends(get_db),cur_user: di
         
         return success_response(data=db_tag)
     except Exception as e:
-         from core.print  import print_error
-         print_error(e)
+         logger.error(str(e))
          raise HTTPException(
             status_code=status.HTTP_201_CREATED,
             detail=error_response(

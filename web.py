@@ -8,6 +8,8 @@ from fastapi.openapi.models import OAuthFlowPassword
 from fastapi.openapi.utils import get_openapi
 import json
 from typing import Any
+from core.log import get_logger, set_trace_id
+from core.events import log_event, E
 from apis.auth import router as auth_router
 from apis.user import router as user_router
 from apis.article import router as article_router
@@ -24,6 +26,8 @@ from apis.ai import router as ai_router
 from apis.github_update import router as github_router
 from apis.billing import router as billing_router
 from apis.analytics import router as analytics_router
+from apis.notice import router as notice_router
+from apis.csdn import router as csdn_router
 from views import router as views_router
 import apis
 import os
@@ -73,6 +77,8 @@ app = FastAPI(
     default_response_class=UnicodeJSONResponse,
 )
 
+_web_logger = get_logger(__name__)
+
 # CORS配置
 app.add_middleware(
     CORSMiddleware,
@@ -81,6 +87,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def trace_id_middleware(request: Request, call_next):
+    """为每个 HTTP 请求注入 trace_id，透传给所有下游日志。"""
+    import uuid
+    tid = str(request.headers.get("X-Trace-ID", "") or "").strip()[:16]
+    if not tid:
+        tid = uuid.uuid4().hex[:8]
+    set_trace_id(tid)
+    response = await call_next(request)
+    response.headers["X-Trace-ID"] = tid
+    return response
+
+
 @app.middleware("http")
 async def add_custom_header(request: Request, call_next):
     response = await call_next(request)
@@ -157,6 +178,8 @@ api_router.include_router(ai_router)
 api_router.include_router(github_router)
 api_router.include_router(billing_router)
 api_router.include_router(analytics_router)
+api_router.include_router(notice_router)
+api_router.include_router(csdn_router)
 
 resource_router = APIRouter(prefix="/static")
 resource_router.include_router(res_router)
@@ -174,7 +197,9 @@ app.include_router(views_router)
 async def ensure_tables():
     try:
         DB.create_tables()
+        log_event(_web_logger, E.SYSTEM_DB_INIT, tables="all")
         start_compose_queue_workers()
+        log_event(_web_logger, E.SYSTEM_STARTUP, version=VERSION, api_base=API_BASE)
     except Exception:
         pass
 

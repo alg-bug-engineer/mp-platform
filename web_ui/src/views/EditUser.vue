@@ -97,6 +97,24 @@
           <a-checkbox v-model="form.clear_wechat_app_secret">清空已保存的 AppSecret</a-checkbox>
         </a-form-item>
         
+        <a-divider orientation="left">CSDN 自动发布配置</a-divider>
+        <a-alert style="margin-bottom: 12px;" type="info">
+          通过扫码登录 CSDN，系统保存浏览器会话状态后自动推送文章。登录态失效时会收到站内信提醒，重新扫码即可恢复。
+        </a-alert>
+        <a-form-item label="CSDN 登录状态">
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <a-tag :color="csdnAuth?.authorized ? 'green' : 'red'">
+              {{ csdnAuth?.authorized ? `已授权（${csdnAuth.csdn_username || '已登录'}）` : '未授权' }}
+            </a-tag>
+            <a-button type="outline" size="small" @click="$router.push('/csdn/auth')">
+              {{ csdnAuth?.authorized ? '重新扫码' : '扫码登录 CSDN' }}
+            </a-button>
+          </div>
+          <div class="muted-tip" v-if="csdnAuth?.updated_at">
+            授权时间：{{ csdnAuth.updated_at }}
+          </div>
+        </a-form-item>
+
         <a-form-item>
           <a-space>
             <a-button type="primary" html-type="submit" :loading="loading">
@@ -115,10 +133,12 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
 import { getUserInfo, updateUserInfo, uploadAvatar } from '@/api/user'
+import { csdnApi, type CsdnAuthStatus } from '@/api/csdn'
 
 const router = useRouter()
 const loading = ref(false)
 const fileList = ref([])
+const csdnAuth = ref<CsdnAuthStatus | null>(null)
 
 const form = ref({
   username: '',
@@ -190,6 +210,13 @@ const fetchUserInfo = async () => {
       wechat_app_secret: '',
       wechat_app_secret_set: !!res.wechat_app_secret_set,
       clear_wechat_app_secret: false,
+    }
+    // 加载 CSDN 授权状态（http 拦截器已解包，res 直接是 CsdnAuthStatus）
+    try {
+      const csdnRes = await csdnApi.getAuthStatus()
+      if (csdnRes) csdnAuth.value = csdnRes as any
+    } catch (e) {
+      // ignore
     }
   } catch (error) {
     router.push('/login')

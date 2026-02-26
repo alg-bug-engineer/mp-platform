@@ -8,8 +8,10 @@ from sqlalchemy import and_, or_, desc
 from .base import success_response, error_response
 from core.config import cfg
 from apis.base import format_search_kw
-from core.print import print_warning, print_info, print_error, print_success
 from core.cache import clear_cache_pattern
+from core.log import get_logger
+from core.events import log_event, E
+logger = get_logger(__name__)
 from tools.fix import fix_article
 router = APIRouter(prefix=f"/articles", tags=["文章管理"])
 
@@ -99,7 +101,7 @@ async def clean_orphan_articles(
         })
     except Exception as e:
         session.rollback()
-        print(f"清理无效文章错误: {str(e)}")
+        logger.error(f"清理无效文章错误: {str(e)}")
         raise HTTPException(
             status_code=fast_status.HTTP_201_CREATED,
             detail=error_response(
@@ -186,7 +188,7 @@ async def clean_duplicate(
         })
     except Exception as e:
         session.rollback()
-        print(f"清理重复文章: {str(e)}")
+        logger.error(f"清理重复文章: {str(e)}")
         raise HTTPException(
             status_code=fast_status.HTTP_201_CREATED,
             detail=error_response(
@@ -234,7 +236,7 @@ async def get_articles(
         articles = query.all()
         
         # 打印生成的 SQL 语句（包含分页参数）
-        print_warning(query.statement.compile(compile_kwargs={"literal_binds": True}))
+        logger.warning(str(query.statement.compile(compile_kwargs={"literal_binds": True})))
                        
         # 查询公众号名称
         from core.models.feed import Feed
@@ -336,7 +338,7 @@ async def delete_article(
         if cfg.get("article.true_delete", False):
             session.delete(article)
         session.commit()
-        
+        log_event(logger, E.ARTICLE_DELETE, owner_id=_owner(current_user), article_id=article_id)
         return success_response(None, message="文章已标记为删除")
     except Exception as e:
         session.rollback()

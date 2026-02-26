@@ -9,7 +9,8 @@ from .base import success_response, error_response
 from core.auth import get_current_user
 from core.config import cfg
 from apis.base import format_search_kw
-from core.print import print_error,print_success
+from core.log import get_logger
+logger = get_logger(__name__)
 def verify_rss_access(current_user: dict = Depends(get_current_user)):
     """
     RSS访问认证方法
@@ -93,7 +94,7 @@ async def get_rss_feeds(
             media_type="application/xml"
         )
     except Exception as e:
-        print(f"获取RSS订阅列表错误: {str(e)}")
+        logger.error(f"获取RSS订阅列表错误: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_406_NOT_ACCEPTABLE,
             detail=error_response(
@@ -276,7 +277,7 @@ async def get_mp_articles_source(
             media_type=rss.get_type()
         )
     except Exception as e:
-        print_error(f"获取RSS错误:{e}")
+        logger.error(f"获取RSS错误:{e}")
         # raise
         return Response(
              content=rss_xml,

@@ -6,6 +6,8 @@ from fastapi import APIRouter,Depends
 from typing import Dict, Any
 from core.auth import get_current_user
 from .base import success_response, error_response
+from core.log import get_logger
+logger = get_logger(__name__)
 from driver.token import wx_cfg
 from core.config import cfg
 from jobs.mps import TaskQueue

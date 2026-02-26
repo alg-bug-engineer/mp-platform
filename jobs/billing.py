@@ -4,7 +4,10 @@ from threading import Thread
 from core.config import cfg
 from core.db import DB
 from core.billing_service import sweep_expired_subscriptions
-from core.log import logger
+from core.log import get_logger
+from core.events import log_event, E
+
+logger = get_logger(__name__)
 
 
 def _worker_loop():
@@ -13,8 +16,12 @@ def _worker_loop():
         session = None
         try:
             session = DB.get_session()
+            log_event(logger, E.BILLING_SWEEP_START, interval=interval)
             result = sweep_expired_subscriptions(session=session, limit=1000)
-            if int(result.get("total", 0) or 0) > 0:
+            total = int(result.get("total", 0) or 0)
+            log_event(logger, E.BILLING_SWEEP_COMPLETE, total=total)
+            if total > 0:
+                log_event(logger, E.BILLING_SUBSCRIPTION_EXPIRE, count=total)
                 logger.info("订阅到期降级完成: %s", result)
         except Exception:
             logger.exception("订阅到期扫描异常")

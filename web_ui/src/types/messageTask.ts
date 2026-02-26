@@ -10,8 +10,13 @@ export interface MessageTask {
   auto_compose_sync_enabled?: number
   auto_compose_platform?: string
   auto_compose_instruction?: string
+  auto_compose_topk?: number
   auto_compose_last_article_id?: string
   auto_compose_last_sync_at?: string
+  csdn_publish_enabled?: number
+  csdn_publish_topk?: number
+  task_type?: string          // 'crawl' | 'publish'
+  publish_platforms?: string[] // ['wechat_mp', 'csdn']
   created_at: string
   updated_at: string
 }
@@ -27,6 +32,11 @@ export interface MessageTaskCreate {
   auto_compose_sync_enabled?: number
   auto_compose_platform?: string
   auto_compose_instruction?: string
+  auto_compose_topk?: number
+  csdn_publish_enabled?: number
+  csdn_publish_topk?: number
+  task_type?: string
+  publish_platforms?: string[]
 }
 
 export interface MessageTaskUpdate {
@@ -40,4 +50,9 @@ export interface MessageTaskUpdate {
   auto_compose_sync_enabled?: number
   auto_compose_platform?: string
   auto_compose_instruction?: string
+  auto_compose_topk?: number
+  csdn_publish_enabled?: number
+  csdn_publish_topk?: number
+  task_type?: string
+  publish_platforms?: string[]
 }

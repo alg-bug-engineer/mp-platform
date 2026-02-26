@@ -8,6 +8,7 @@ export interface UserInfo {
   avatar: string
   wechat_app_id?: string
   wechat_app_secret_set?: boolean
+  csdn_cookies_set?: boolean
   role: string
   is_active: boolean
   created_at: string
@@ -112,6 +113,7 @@ export interface UpdateUserParams {
   wechat_app_id?: string
   wechat_app_secret?: string
   clear_wechat_app_secret?: boolean
+  csdn_cookies?: string
   password?: string
   is_active?: boolean
   plan_tier?: string

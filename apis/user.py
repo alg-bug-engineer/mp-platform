@@ -16,6 +16,8 @@ from core.plan_service import (
 )
 from core.wechat_auth_service import serialize_wechat_auth, get_wechat_auth
 from .base import success_response, error_response
+from core.log import get_logger
+logger = get_logger(__name__)
 router = APIRouter(prefix="/user", tags=["用户管理"])
 
 
@@ -54,6 +56,7 @@ async def get_user_info(current_user: dict = Depends(get_current_user)):
             "email": user.email if user.email else "",
             "wechat_app_id": str(getattr(user, "wechat_app_id", "") or ""),
             "wechat_app_secret_set": bool(str(getattr(user, "wechat_app_secret", "") or "").strip()),
+            "csdn_cookies_set": bool(str(getattr(user, "csdn_cookies", "") or "").strip()),
             "role": user.role,
             "is_active": user.is_active,
             "plan": {
@@ -336,6 +339,9 @@ async def update_user_info(
                 user.wechat_app_secret = secret_value
             elif clear_secret:
                 user.wechat_app_secret = ""
+        if "csdn_cookies" in update_data:
+            csdn_cookies_value = str(update_data.get("csdn_cookies") or "").strip()
+            user.csdn_cookies = csdn_cookies_value if csdn_cookies_value else None
         if "role" in update_data and current_user["role"] == "admin":
             user.role = update_data["role"]
 

@@ -19,8 +19,11 @@ from core.ai_service import (
 )
 from core.config import cfg
 from core.db import DB
-from core.log import logger
+from core.log import get_logger
+from core.events import log_event, E
 from core.models.ai_compose_task import AIComposeTask
+
+logger = get_logger(__name__)
 from core.models.ai_daily_usage import AIDailyUsage
 from core.models.article import Article
 from core.models.base import DATA_STATUS
@@ -193,6 +196,7 @@ def enqueue_compose_task(
     session.add(task)
     session.commit()
     session.refresh(task)
+    log_event(logger, E.AI_COMPOSE_ENQUEUE, task_id=task.id, owner_id=task.owner_id, article_id=task.article_id, mode=task.mode)
     return task
 
 
@@ -360,6 +364,7 @@ def process_compose_task(session, task: AIComposeTask) -> Tuple[bool, str]:
     if not _mark_task_processing(session, task, now):
         return False, "任务状态已变更"
 
+    log_event(logger, E.AI_COMPOSE_START, task_id=task.id, owner_id=task.owner_id, mode=task.mode)
     try:
         result = _run_compose_pipeline(session, task)
         task.status = COMPOSE_TASK_STATUS_SUCCESS
@@ -369,6 +374,7 @@ def process_compose_task(session, task: AIComposeTask) -> Tuple[bool, str]:
         task.updated_at = datetime.now()
         task.finished_at = task.updated_at
         session.commit()
+        log_event(logger, E.AI_COMPOSE_COMPLETE, task_id=task.id, owner_id=task.owner_id, mode=task.mode)
         return True, "任务完成"
     except ComposeTaskError as e:
         session.rollback()
@@ -378,6 +384,7 @@ def process_compose_task(session, task: AIComposeTask) -> Tuple[bool, str]:
         logger.exception("处理 AI 创作任务失败 task_id=%s", str(task.id or ""))
         message = f"系统异常: {str(e)}"
 
+    log_event(logger, E.AI_COMPOSE_FAIL, level="error", task_id=task.id, owner_id=task.owner_id, reason=message)
     fail_row = session.query(AIComposeTask).filter(AIComposeTask.id == task.id).first()
     if fail_row:
         fail_row.status = COMPOSE_TASK_STATUS_FAILED
@@ -457,5 +464,5 @@ def start_compose_queue_workers() -> int:
             t.start()
             _WORKER_THREADS.append(t)
         _WORKER_STARTED = True
-        logger.info("AI 创作队列 worker 已启动: %s", worker_count)
+        log_event(logger, E.SYSTEM_QUEUE_START, workers=worker_count, queue="ai_compose")
         return len(_WORKER_THREADS)

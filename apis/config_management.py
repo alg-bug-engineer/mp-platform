@@ -7,6 +7,8 @@ from pydantic import BaseModel
 from .base import error_response, success_response
 from core.auth import get_current_user
 from core.config import cfg
+from core.log import get_logger
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/configs", tags=["配置管理"])
 

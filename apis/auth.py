@@ -27,17 +27,19 @@ from core.wechat_auth_service import (
     validate_and_maybe_clear_wechat_auth,
     migrate_global_auth_to_owner,
 )
+from core.log import get_logger
+from core.events import log_event, E
+logger = get_logger(__name__)
 router = APIRouter(prefix=f"/auth", tags=["认证"])
 from driver.success import Success
 from driver.wx_api import get_qr_code #通过API登录
 def ApiSuccess(data):
     if data != None:
-            print("\n登录结果:")
-            print(f"Token: {data['token']}")
+            logger.info(f"Token: {data['token']}")
             set_config("token",data['token'])
             cfg.reload()
     else:
-            print("\n登录失败，请检查上述错误信息")
+            logger.warning("登录失败，请检查上述错误信息")
 @router.get("/qr/code", summary="获取登录二维码")
 async def get_qrcode(current_user=Depends(get_current_user)):
     owner_id = current_user.get("username")
@@ -64,9 +66,11 @@ async def get_qrcode(current_user=Depends(get_current_user)):
             except Exception:
                 pass
 
+    log_event(logger, E.AUTH_QR_GENERATE, owner_id=owner_id)
     code_url = WX_API.GetCode(_on_auth_success) or {}
     if not code_url.get("code"):
         message = str(code_url.get("msg") or "二维码获取失败，请稍后重试")
+        log_event(logger, E.AUTH_QR_FAIL, level="warning", owner_id=owner_id, reason=message)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=error_response(code=50301, message=message),
@@ -150,8 +154,10 @@ async def migrate_global_wechat_auth(payload: dict = None, current_user=Depends(
     return success_response(result)
 @router.post("/login", summary="用户登录")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    log_event(logger, E.AUTH_LOGIN_ATTEMPT, owner_id=form_data.username)
     user = authenticate_user(form_data.username, form_data.password)
     if not user:
+        log_event(logger, E.AUTH_LOGIN_FAIL, level="warning", owner_id=form_data.username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=error_response(
@@ -163,6 +169,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
+    log_event(logger, E.AUTH_LOGIN_SUCCESS, owner_id=user.username)
     return success_response({
         "access_token": access_token,
         "token_type": "bearer",
@@ -256,6 +263,7 @@ async def getToken(form_data: OAuth2PasswordRequestForm = Depends()):
 
 @router.post("/logout", summary="用户注销")
 async def logout(current_user: dict = Depends(get_current_user)):
+    log_event(logger, E.AUTH_LOGOUT, owner_id=current_user.get("username"))
     return {"code": 0, "message": "注销成功"}
 
 @router.post("/refresh", summary="刷新Token")
@@ -264,6 +272,7 @@ async def refresh_token(current_user: dict = Depends(get_current_user)):
     access_token = create_access_token(
         data={"sub": current_user["username"]}, expires_delta=access_token_expires
     )
+    log_event(logger, E.AUTH_TOKEN_REFRESH, owner_id=current_user.get("username"))
     return success_response({
         "access_token": access_token,
         "token_type": "bearer",

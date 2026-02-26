@@ -178,13 +178,25 @@ const routes = [
         }
       },
       {
+        path: 'workspace/notices',
+        name: 'Notices',
+        component: () => import('@/views/Notices.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'csdn/auth',
+        name: 'CsdnAuth',
+        component: () => import('@/views/CsdnAuth.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
         path: 'tags',
         name: 'TagList',
         alias: ['/workspace/ops/tags'],
         component: () => import('@/views/TagList.vue'),
-        meta: { 
+        meta: {
           requiresAuth: true,
-          permissions: ['tag:view'] 
+          permissions: ['tag:view']
         }
       },
       {

@@ -46,7 +46,14 @@
                     @click="navigateToWithQuery(item.path, item.query)"
                   >
                     <span class="item-icon">
-                      <component :is="item.icon" />
+                      <a-badge
+                        v-if="item.key === 'account-notices' && unreadCount > 0"
+                        :count="unreadCount"
+                        :max-count="99"
+                      >
+                        <component :is="item.icon" />
+                      </a-badge>
+                      <component v-else :is="item.icon" />
                     </span>
                     <span v-if="!navCollapsed" class="item-copy">
                       <span class="item-label">{{ item.label }}</span>
@@ -101,12 +108,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, provide, ref, watch, type Component } from 'vue'
+import { computed, onMounted, onUnmounted, provide, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
 import {
   IconApps,
   IconBook,
+  IconNotification,
   IconCommand,
   IconEdit,
   IconFile,
@@ -120,6 +128,7 @@ import {
   IconUser,
 } from '@arco-design/web-vue/es/icon'
 import { getCurrentUser, getWechatAuthStatus, logout, type CurrentUser } from '@/api/auth'
+import { getUnreadCount } from '@/api/notice'
 import WechatAuthQrcode from '@/components/WechatAuthQrcode.vue'
 import brandLogo from '@/assets/logo.svg'
 import { loadRuntimeSettings } from '@/utils/runtime'
@@ -167,6 +176,7 @@ const nodes: NavNode[] = [
 
   { key: 'account-profile', label: '个人中心', hint: '账号信息', path: '/edit-user', group: 'account', icon: IconUser },
   { key: 'account-password', label: '修改密码', hint: '安全设置', path: '/change-password', group: 'account', icon: IconLock },
+  { key: 'account-notices', label: '我的消息', hint: '系统通知', path: '/workspace/notices', group: 'account', icon: IconNotification, prefix: true },
 
   { key: 'admin-plans', label: '用户管理', hint: '用户/配额/授权', path: '/workspace/admin/plans', group: 'admin', icon: IconCommand, adminOnly: true, prefix: true },
   { key: 'admin-analytics', label: '数据统计', hint: '运营分析面板', path: '/workspace/admin/analytics', group: 'admin', icon: IconFile, adminOnly: true, prefix: true },
@@ -183,6 +193,8 @@ const userInfo = ref<CurrentUser>({
   nickname: '',
 })
 const wxAuthReady = ref(false)
+const unreadCount = ref(0)
+let unreadTimer: ReturnType<typeof setInterval> | null = null
 const navCollapsed = ref(localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === '1')
 const runtimeSettings = ref({
   product_mode: 'all_free',
@@ -301,6 +313,16 @@ const consumeRouteNotice = () => {
   router.replace({ path: route.path, query: nextQuery, hash: route.hash })
 }
 
+const fetchUnreadCount = async () => {
+  if (!localStorage.getItem('token')) return
+  try {
+    const res = await getUnreadCount()
+    unreadCount.value = res?.count ?? 0
+  } catch {
+    // ignored
+  }
+}
+
 const fetchUser = async () => {
   if (!localStorage.getItem('token')) {
     wxAuthReady.value = false
@@ -362,6 +384,15 @@ onMounted(() => {
   fetchRuntime()
   fetchUser()
   consumeRouteNotice()
+  fetchUnreadCount()
+  unreadTimer = setInterval(fetchUnreadCount, 60000)
+})
+
+onUnmounted(() => {
+  if (unreadTimer) {
+    clearInterval(unreadTimer)
+    unreadTimer = null
+  }
 })
 </script>
 

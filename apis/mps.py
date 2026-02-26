@@ -1,4 +1,3 @@
-from logging import info
 import re
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body, UploadFile, File
 from fastapi.responses import FileResponse
@@ -17,6 +16,9 @@ import os
 import uuid
 from jobs.article import UpdateArticle
 from driver.wxarticle import WXArticleFetcher
+from core.log import get_logger
+from core.events import log_event, E
+logger = get_logger(__name__)
 router = APIRouter(prefix=f"/mps", tags=["公众号管理"])
 # import core.db as db
 # UPDB=db.Db("数据抓取")
@@ -108,7 +110,7 @@ async def search_mp(
         raise
     except Exception as e:
         err_text = _sanitize_error(str(e))
-        print(f"搜索公众号错误: {err_text}")
+        logger.error(f"搜索公众号错误: {err_text}")
         if _is_auth_invalid_error(err_text):
             try:
                 from core.wechat_auth_service import get_wechat_auth
@@ -167,7 +169,7 @@ async def get_mps(
             "total": total
         })
     except Exception as e:
-        print(f"获取公众号列表错误: {str(e)}")
+        logger.error(f"获取公众号列表错误: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_201_CREATED,
             detail=error_response(
@@ -247,7 +249,7 @@ async def update_mps(
                 )
                 result = wx.articles
             except Exception as e:
-                print(f"更新公众号文章线程异常: {e}")
+                logger.error(f"更新公众号文章线程异常: {e}")
         import threading
         threading.Thread(target=UpArt, args=(mp_payload,), daemon=True).start()
         return success_response({
@@ -257,7 +259,7 @@ async def update_mps(
             "mps":mp
         })
     except Exception as e:
-        print(f"更新公众号文章: {str(e)}",e)
+        logger.error(f"更新公众号文章: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_201_CREATED,
             detail=error_response(
@@ -288,7 +290,7 @@ async def get_mp(
             )
         return success_response(mp)
     except Exception as e:
-        print(f"获取公众号详情错误: {str(e)}")
+        logger.error(f"获取公众号详情错误: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_201_CREATED,
             detail=error_response(
@@ -314,7 +316,7 @@ async def get_mp_by_article(
             )
         return success_response(info)
     except Exception as e:
-        print(f"获取公众号详情错误: {str(e)}")
+        logger.error(f"获取公众号详情错误: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_201_CREATED,
             detail=error_response(
@@ -403,6 +405,7 @@ async def add_mp(
                 )
                 fetch_scheduled = True
             
+        log_event(logger, E.FEED_SUBSCRIBE, owner_id=owner_id, mp_name=mp_name, mp_id=feed.id)
         return success_response({
             "id": feed.id,
             "mp_name": feed.mp_name,
@@ -415,7 +418,7 @@ async def add_mp(
         })
     except Exception as e:
         session.rollback()
-        print(f"添加公众号错误: {str(e)}")
+        logger.error(f"添加公众号错误: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_201_CREATED,
             detail=error_response(
@@ -454,13 +457,14 @@ async def delete_mp(
         ).delete(synchronize_session=False)
         session.delete(mp)
         session.commit()
+        log_event(logger, E.FEED_UNSUBSCRIBE, owner_id=owner_id, mp_id=mp_id)
         return success_response({
             "message": "订阅号删除成功",
             "id": mp_id
         })
     except Exception as e:
         session.rollback()
-        print(f"删除订阅号错误: {str(e)}")
+        logger.error(f"删除订阅号错误: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_201_CREATED,
             detail=error_response(

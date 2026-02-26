@@ -7,11 +7,10 @@ GitHub 更新 API 接口
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, List
-import logging
 import os
 from tools.github_updater import GitHubUpdater
-
-logger = logging.getLogger(__name__)
+from core.log import get_logger
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/github", tags=["GitHub更新"])
 

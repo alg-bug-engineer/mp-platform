@@ -56,7 +56,9 @@ from core.plan_service import (
 )
 from core.wechat_auth_service import has_wechat_auth
 from .base import success_response
-
+from core.log import get_logger
+from core.events import log_event, E
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/ai", tags=["AI创作"])
 
@@ -721,6 +723,7 @@ async def _submit_compose_task(mode: str, article_id: str, payload: AIComposeReq
         mode=mode,
         request_payload=_build_compose_request_payload(payload),
     )
+    log_event(logger, E.AI_COMPOSE_ENQUEUE, owner_id=owner_id, article_id=article.id, mode=mode)
     queued_total = count_compose_tasks(
         session,
         owner_id=owner_id,
@@ -824,6 +827,7 @@ async def publish_draft(article_id: str, payload: DraftPublishRequest, current_u
             )
         )
 
+    log_event(logger, E.AI_PUBLISH_ENQUEUE, owner_id=owner_id, article_id=article_id, count=len(local_records))
     queued_tasks = []
     wechat_result = {
         "requested": bool(payload.sync_to_wechat),

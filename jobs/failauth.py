@@ -1,4 +1,5 @@
-from core.print import print_warning
+from core.log import get_logger
+_logger = get_logger(__name__)
 from driver.base import WX_API
 from core.config import cfg
 from jobs.notice import sys_notice
@@ -12,7 +13,7 @@ def send_wx_code(title:str="",url:str=""):
     pass
 def CallBackNotice(data=None,ext_data=None):
         if data is not None:
-            print_warning(data)
+            _logger.warning(str(data))
             return 
         img_path=WX_API.QRcode()['code']
         rss_domain=str(cfg.get("rss.base_url",""))

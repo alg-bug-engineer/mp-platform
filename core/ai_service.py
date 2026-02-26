@@ -6,7 +6,6 @@ import json
 import uuid
 import time
 import html
-import logging
 import hashlib
 import io
 from pathlib import Path
@@ -17,11 +16,13 @@ import yaml
 from fastapi import HTTPException, status
 
 from core.config import cfg
+from core.log import get_logger
+from core.events import log_event, E
 from core.models.ai_profile import AIProfile
 from core.models.ai_publish_task import AIPublishTask
 from core.models.ai_compose_result import AIComposeResult
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 DEFAULT_BASE_URL = "https://api.moonshot.cn/v1"
 DEFAULT_MODEL = "kimi-k2-0711-preview"
@@ -73,6 +74,17 @@ DEFAULT_LOCAL_RULES = {
                 "避免营销腔和口号式表达",
                 "增加对比分析与适用边界",
                 "尽量给数据或案例支撑",
+            ],
+        },
+        "csdn": {
+            "label": "CSDN 博客",
+            "style": "技术实用、逻辑清晰、可直接发布",
+            "structure": "标题-摘要-背景-核心分析-代码/数据-结论",
+            "constraints": [
+                "禁止在正文中插入任何图片（包括 Markdown 格式 ![...](url)），图片会导致转存失败",
+                "图片位置改用纯文字标注，例如：【图：XXX 架构示意图】",
+                "内容以 Markdown 段落和标题为主，代码块和表格适度使用",
+                "避免空话套话，优先给可验证的技术结论",
             ],
         },
         "twitter": {
@@ -2795,7 +2807,7 @@ def _try_prepare_openapi_article_via_pipeline(
     if not markdown:
         return None, {"error": "内容为空"}
     try:
-        from pipeline import WeChatDraftHelper, _markdown_to_html as pipeline_markdown_to_html, format_markdown
+        from references.pipeline import WeChatDraftHelper, _markdown_to_html as pipeline_markdown_to_html, format_markdown
     except Exception as e:
         return None, {"error": f"pipeline 模块不可用: {e}"}
 

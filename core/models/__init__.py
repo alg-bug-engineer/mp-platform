@@ -17,5 +17,7 @@ from .wechat_auth import WechatAuth
 from .billing_order import BillingOrder
 from .analytics_event import AnalyticsEvent
 from .message_task_log import MessageTaskLog
+from .user_notice import UserNotice
+from .csdn_auth import CsdnAuth
 # 导入基础模型
 from .base import *

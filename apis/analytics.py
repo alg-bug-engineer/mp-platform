@@ -21,7 +21,8 @@ from core.product_mode import (
     set_product_mode,
 )
 from .base import success_response
-
+from core.log import get_logger
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/analytics", tags=["运营分析"])
 

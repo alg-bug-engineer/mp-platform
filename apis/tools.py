@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field
 from core.auth import get_current_user
 from core.db import DB
 from .base import success_response, error_response,BaseResponse
+from core.log import get_logger
+logger = get_logger(__name__)
 from datetime import datetime
 from typing import Optional, List
 import os

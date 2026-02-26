@@ -5,7 +5,9 @@ from pydantic import BaseModel
 import uuid
 from datetime import datetime
 from typing import List, Optional
-from core.print import print_error, print_info
+from core.log import get_logger
+from core.events import log_event, E
+logger = get_logger(__name__)
 # 2. 第三方库导入
 from fastapi import APIRouter, Depends, HTTPException, status,Body,Query
 from sqlalchemy.orm import Session
@@ -218,7 +220,7 @@ async def run_message_task(
                     mps['count']=count
                     mps['list'].append(ids)
                 except Exception as e:
-                    print_error(e)
+                    logger.error(str(e))
                     pass
         if isTest:
             count=1
@@ -226,7 +228,7 @@ async def run_message_task(
         return success_response(data=mps,message=f"执行成功，共执行更新{count}个订阅号")
 
     except Exception as e:
-        print_error(e)
+        logger.error(str(e))
         return error_response(code=402, message=str(e))
 
 
@@ -240,6 +242,11 @@ class MessageTaskCreate(BaseModel):
     auto_compose_sync_enabled: int = 0
     auto_compose_platform: str = "wechat"
     auto_compose_instruction: str = ""
+    auto_compose_topk: int = 1
+    csdn_publish_enabled: int = 0
+    csdn_publish_topk: int = 3
+    task_type: str = 'crawl'
+    publish_platforms: list = []
     status: Optional[int] = 0
 
 @router.post("", summary="创建消息任务", status_code=status.HTTP_201_CREATED)
@@ -262,6 +269,7 @@ async def create_message_task(
     """
     db=DB.get_session()
     try:
+        import json as _json
         db_task = MessageTask(
             id=str(uuid.uuid4()),
             owner_id=_owner(current_user),
@@ -274,15 +282,21 @@ async def create_message_task(
             auto_compose_sync_enabled=1 if int(task_data.auto_compose_sync_enabled or 0) else 0,
             auto_compose_platform=str(task_data.auto_compose_platform or "wechat").strip().lower() or "wechat",
             auto_compose_instruction=str(task_data.auto_compose_instruction or "").strip(),
+            auto_compose_topk=max(1, int(task_data.auto_compose_topk or 1)),
+            csdn_publish_enabled=1 if int(task_data.csdn_publish_enabled or 0) else 0,
+            csdn_publish_topk=max(1, int(task_data.csdn_publish_topk or 3)),
+            task_type=str(task_data.task_type or 'crawl').strip() or 'crawl',
+            publish_platforms=_json.dumps(task_data.publish_platforms or [], ensure_ascii=False),
             status=task_data.status if task_data.status is not None else 0
         )
         db.add(db_task)
         db.commit()
         db.refresh(db_task)
+        log_event(logger, E.TASK_SCHEDULE_ADD, owner_id=_owner(current_user), task_id=db_task.id, name=db_task.name)
         return success_response(data=db_task)
     except Exception as e:
         db.rollback()
-        print_error(e)
+        logger.error(str(e))
         return error_response(code=500, message=str(e))
 
 @router.put("/{task_id}", summary="更新消息任务")
@@ -329,9 +343,14 @@ async def update_message_task(
             db_task.message_type = task_data.message_type
         if task_data.name is not None:
             db_task.name = task_data.name
+        import json as _json
         db_task.auto_compose_sync_enabled = 1 if int(task_data.auto_compose_sync_enabled or 0) else 0
         db_task.auto_compose_platform = str(task_data.auto_compose_platform or "wechat").strip().lower() or "wechat"
         db_task.auto_compose_instruction = str(task_data.auto_compose_instruction or "").strip()
+        db_task.auto_compose_topk = max(1, int(task_data.auto_compose_topk or 1))
+        db_task.csdn_publish_enabled = 1 if int(task_data.csdn_publish_enabled or 0) else 0
+        db_task.csdn_publish_topk = max(1, int(task_data.csdn_publish_topk or 3))
+        db_task.publish_platforms = _json.dumps(task_data.publish_platforms or [], ensure_ascii=False)
         db.commit()
         db.refresh(db_task)
         return success_response(data=db_task)
@@ -381,6 +400,7 @@ async def delete_message_task(
         
         db.delete(db_task)
         db.commit()
+        log_event(logger, E.TASK_SCHEDULE_REMOVE, owner_id=_owner(current_user), task_id=task_id)
         return success_response(message="Message task deleted successfully")
     except Exception as e:
         db.rollback()

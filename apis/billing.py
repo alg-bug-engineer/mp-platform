@@ -16,7 +16,9 @@ from core.billing_service import (
     get_user_billing_overview,
 )
 from .base import success_response
-
+from core.log import get_logger
+from core.events import log_event, E
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/billing", tags=["支付订阅"])
 
@@ -77,6 +79,7 @@ async def create_billing_order(payload: CreateOrderRequest, current_user: dict =
             channel=payload.channel,
             note=payload.note,
         )
+        log_event(logger, E.BILLING_ORDER_CREATE, owner_id=user.username, plan_tier=payload.plan_tier, months=payload.months, channel=payload.channel)
         return success_response(create_order_payload(order), message="订单创建成功")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"创建订单失败: {e}")
@@ -119,6 +122,7 @@ async def pay_order(order_no: str, payload: PayOrderRequest, current_user: dict 
             provider_txn_id=payload.provider_txn_id,
             provider_payload=payload.provider_payload,
         )
+        log_event(logger, E.BILLING_ORDER_PAY, owner_id=order.owner_id, order_no=order_no)
         return success_response(create_order_payload(updated), message="订单支付成功")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"订单支付失败: {e}")

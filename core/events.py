@@ -113,6 +113,7 @@ class E:
     NOTICE_READ = "notice.read"
     NOTICE_READ_ALL = "notice.read_all"
     NOTICE_DELETE = "notice.delete"
+    NOTICE_DELETE_ALL = "notice.delete_all"
 
     # ── Webhook ────────────────────────────────────────────────────────────────
     WEBHOOK_SEND_START = "webhook.send.start"

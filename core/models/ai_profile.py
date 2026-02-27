@@ -8,7 +8,7 @@ class AIProfile(Base):
     id = Column(String(255), primary_key=True)
     owner_id = Column(String(50), unique=True, index=True, nullable=False)
     provider_name = Column(String(50), default="openai-compatible")
-    model_name = Column(String(100), default="kimi-k2-0711-preview")
+    model_name = Column(String(100), default="kimi-k2.5")
     base_url = Column(String(500), nullable=False)
     api_key = Column(String(500), nullable=False)
     temperature = Column(Integer, default=70)

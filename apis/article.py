@@ -234,9 +234,6 @@ async def get_articles(
         # query= query.order_by(Article.id.desc()).offset(offset).limit(limit)
         # 分页查询（按发布时间降序）
         articles = query.all()
-        
-        # 打印生成的 SQL 语句（包含分页参数）
-        logger.warning(str(query.statement.compile(compile_kwargs={"literal_binds": True})))
                        
         # 查询公众号名称
         from core.models.feed import Feed

@@ -3,12 +3,19 @@
     <a-page-header title="我的消息" subtitle="系统通知与任务结果">
       <template #extra>
         <a-space>
-          <a-radio-group v-model="filterStatus" type="button" @change="onFilterChange">
+          <a-radio-group v-model:model-value="filterStatus" type="button" @change="onFilterChange">
             <a-radio :value="undefined">全部</a-radio>
             <a-radio :value="0">未读</a-radio>
             <a-radio :value="1">已读</a-radio>
           </a-radio-group>
           <a-button @click="handleMarkAllRead" :loading="markingAll">全部已读</a-button>
+          <a-popconfirm
+            content="确认删除所有消息？此操作不可撤销。"
+            type="warning"
+            @ok="handleDeleteAll"
+          >
+            <a-button status="danger" :loading="deletingAll">全部删除</a-button>
+          </a-popconfirm>
         </a-space>
       </template>
     </a-page-header>
@@ -49,7 +56,7 @@
               <span class="notice-time">{{ formatTime(notice.created_at) }}</span>
               <a-popconfirm
                 content="确认删除此条消息？"
-                @ok.stop="handleDelete(notice)"
+                @ok="handleDelete(notice)"
                 @click.stop
               >
                 <a-button size="mini" type="text" status="danger" @click.stop>删除</a-button>
@@ -92,12 +99,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, inject } from 'vue'
 import { Message } from '@arco-design/web-vue'
-import { listNotices, markRead, markAllRead, deleteNotice, type UserNotice } from '@/api/notice'
+import { listNotices, markRead, markAllRead, deleteNotice, deleteAllNotices, type UserNotice } from '@/api/notice'
 
+const fetchUnreadCountGlobal = inject('fetchUnreadCount') as () => Promise<void>
 const loading = ref(false)
 const markingAll = ref(false)
+const deletingAll = ref(false)
 const notices = ref<UserNotice[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -157,6 +166,7 @@ const openDetail = async (notice: UserNotice) => {
     try {
       await markRead(notice.id)
       notice.status = 1
+      if (fetchUnreadCountGlobal) fetchUnreadCountGlobal()
     } catch {
       // ignore
     }
@@ -168,11 +178,28 @@ const handleMarkAllRead = async () => {
   try {
     await markAllRead()
     notices.value.forEach(n => { n.status = 1 })
+    if (fetchUnreadCountGlobal) fetchUnreadCountGlobal()
     Message.success('已全部标记已读')
   } catch {
     Message.error('操作失败')
   } finally {
     markingAll.value = false
+  }
+}
+
+const handleDeleteAll = async () => {
+  deletingAll.value = true
+  try {
+    await deleteAllNotices()
+    notices.value = []
+    total.value = 0
+    detailVisible.value = false
+    if (fetchUnreadCountGlobal) fetchUnreadCountGlobal()
+    Message.success('已清空所有消息')
+  } catch {
+    Message.error('删除失败')
+  } finally {
+    deletingAll.value = false
   }
 }
 
@@ -182,6 +209,7 @@ const handleDelete = async (notice: UserNotice) => {
     notices.value = notices.value.filter(n => n.id !== notice.id)
     total.value = Math.max(0, total.value - 1)
     if (detailNotice.value?.id === notice.id) detailVisible.value = false
+    if (fetchUnreadCountGlobal) fetchUnreadCountGlobal()
     Message.success('已删除')
   } catch {
     Message.error('删除失败')

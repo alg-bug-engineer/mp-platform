@@ -11,6 +11,7 @@ dock_build.bat
 *.log
 .claude
 .pytest_cache/
+references/*
 logs
 output/
 item

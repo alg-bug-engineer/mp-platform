@@ -172,12 +172,22 @@ class TaskScheduler:
         :param job_id: 要移除的任务ID
         :return: 是否成功移除
         """
+        job_id = str(job_id)
         with self._lock:
-            if job_id in self._jobs:
+            # 无论是否在本地 _jobs 字典中，都尝试从底层调度器移除
+            success = False
+            try:
                 self._scheduler.remove_job(job_id)
+                success = True
+            except Exception:
+                # 如果任务不存在底层调度器，会抛出异常，忽略它
+                pass
+            
+            if job_id in self._jobs:
                 del self._jobs[job_id]
-                return True
-            return False
+                success = True
+                
+            return success
     
     def clear_all_jobs(self) -> int:
         """

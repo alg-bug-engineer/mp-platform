@@ -143,6 +143,25 @@ async def delete_notice(notice_id: str, current_user: dict = Depends(get_current
             pass
 
 
+@router.delete("", summary="删除所有站内信")
+async def delete_all_notices(current_user: dict = Depends(get_current_user)):
+    session = DB.get_session()
+    try:
+        owner_id = _owner(current_user)
+        session.query(UserNotice).filter(UserNotice.owner_id == owner_id).delete(synchronize_session=False)
+        session.commit()
+        log_event(logger, E.NOTICE_DELETE_ALL, owner_id=owner_id)
+        return success_response(message="已全部删除")
+    except Exception as e:
+        session.rollback()
+        return error_response(code=500, message=str(e))
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
 def _serialize(row: UserNotice) -> dict:
     return {
         "id": str(row.id or ""),

@@ -24,5 +24,6 @@ if __name__ == '__main__':
             reload_dirs=['core','web_ui'],
             reload_excludes=['static','web_ui','data'], 
             workers=thread,
+            log_config=None,
             )
     pass

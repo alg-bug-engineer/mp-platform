@@ -63,7 +63,7 @@ postgresql://rss_user:pass123456@postgres:5432/we_mp_rss
 登录后进入 `AI 创作` 页面，填写：
 
 - `Base URL`（如 OpenAI 兼容网关地址）
-- `Model`（如 `kimi-k2-0711-preview`）
+- `Model`（如 `kimi-k2.5`）
 - `API Key`
 
 保存后可在文章列表对单篇内容执行：

@@ -33,6 +33,7 @@ class MessageTask(Base):
     auto_compose_last_sync_at = Column(DateTime, nullable=True)
     auto_compose_topk = Column(Integer, default=1)  # 公众号topk检查篇数
     auto_compose_published_ids = Column(Text, default="[]")  # 已创作/推送文章ID列表(JSON)
+    auto_compose_wechat_mode = Column(String(32), default="draft_only")  # "draft_only" | "draft_and_publish"
     csdn_publish_enabled = Column(Integer, default=0)  # 是否启用CSDN推送
     csdn_publish_topk = Column(Integer, default=3)  # CSDN推送检查topk篇数
     csdn_published_ids = Column(Text, default="[]")  # 已推送CSDN的文章ID列表(JSON)

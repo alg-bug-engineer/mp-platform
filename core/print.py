@@ -64,30 +64,40 @@ printer = ColorPrinter()
 
 
 def _log(level: str, text: str) -> None:
-    """将 print_* 调用路由至统一日志系统（stacklevel=3 显示真实调用方）。"""
+    """将 print_* 调用路由至统一日志系统（stacklevel=4 显示真实调用方）。"""
     import logging
-    logging.getLogger("app").log(
+    # 移除首尾空白
+    msg = str(text).strip()
+    if not msg:
+        return
+        
+    logging.getLogger("legacy.print").log(
         getattr(logging, level.upper()),
-        str(text),
-        stacklevel=3,
+        msg,
+        stacklevel=4,
     )
 
 
 def print_error(text, **kwargs):
-    printer.print_error(text, **kwargs)
+    # 如果在终端环境，依然输出彩色文本到 stderr
+    if sys.stdout.isatty():
+        printer.print_error(text, **kwargs)
     _log("error", text)
 
 
 def print_info(text, **kwargs):
-    printer.print_info(text, **kwargs)
+    if sys.stdout.isatty():
+        printer.print_info(text, **kwargs)
     _log("info", text)
 
 
 def print_warning(text, **kwargs):
-    printer.print_warning(text, **kwargs)
+    if sys.stdout.isatty():
+        printer.print_warning(text, **kwargs)
     _log("warning", text)
 
 
 def print_success(text, **kwargs):
-    printer.print_success(text, **kwargs)
+    if sys.stdout.isatty():
+        printer.print_success(text, **kwargs)
     _log("info", text)

@@ -41,3 +41,7 @@ export const markAllRead = () => {
 export const deleteNotice = (id: string) => {
   return http.delete<{ code: number; message: string }>(`/wx/notices/${id}`)
 }
+
+export const deleteAllNotices = () => {
+  return http.delete<{ code: number; message: string }>('/wx/notices')
+}

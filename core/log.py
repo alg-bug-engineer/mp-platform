@@ -111,6 +111,7 @@ def _setup_app_logging() -> None:
     if any(getattr(h, _APP_HANDLER_MARKER, False) for h in root.handlers):
         return
 
+    # 设置根日志级别
     root.setLevel(_level)
 
     # 控制台 handler（stdout，被 nohup 捕获到 content-studio.log）
@@ -142,7 +143,7 @@ def _setup_app_logging() -> None:
     if _LOG_FILE:
         fh = logging.handlers.RotatingFileHandler(
             f"{_LOG_FILE}.log",
-            maxBytes=5 * 1024 * 1024,
+            maxBytes=10 * 1024 * 1024,
             backupCount=7,
             encoding="utf-8",
         )
@@ -151,6 +152,28 @@ def _setup_app_logging() -> None:
         fh.addFilter(_trace_filter)
         setattr(fh, _APP_HANDLER_MARKER, True)
         root.addHandler(fh)
+
+    # ── 抑制第三方库的过载日志 ──
+    # 彻底关闭 Uvicorn 默认的访问日志（由我们在 web.py 的中间件更结构化地记录）
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+    
+    # SQLAlchemy 只显示警告以上级别
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
+    
+    # 爬虫/网络库
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("playwright").setLevel(logging.INFO)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    
+    # 其他常见库
+    logging.getLogger("apscheduler").setLevel(logging.INFO)
+    logging.getLogger("amqp").setLevel(logging.WARNING)
+
+
+_setup_app_logging()
 
 
 _setup_app_logging()

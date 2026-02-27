@@ -243,6 +243,7 @@ class MessageTaskCreate(BaseModel):
     auto_compose_platform: str = "wechat"
     auto_compose_instruction: str = ""
     auto_compose_topk: int = 1
+    auto_compose_wechat_mode: str = "draft_only"
     csdn_publish_enabled: int = 0
     csdn_publish_topk: int = 3
     task_type: str = 'crawl'
@@ -283,6 +284,7 @@ async def create_message_task(
             auto_compose_platform=str(task_data.auto_compose_platform or "wechat").strip().lower() or "wechat",
             auto_compose_instruction=str(task_data.auto_compose_instruction or "").strip(),
             auto_compose_topk=max(1, int(task_data.auto_compose_topk or 1)),
+            auto_compose_wechat_mode=task_data.auto_compose_wechat_mode if task_data.auto_compose_wechat_mode in ("draft_only", "draft_and_publish") else "draft_only",
             csdn_publish_enabled=1 if int(task_data.csdn_publish_enabled or 0) else 0,
             csdn_publish_topk=max(1, int(task_data.csdn_publish_topk or 3)),
             task_type=str(task_data.task_type or 'crawl').strip() or 'crawl',
@@ -348,11 +350,24 @@ async def update_message_task(
         db_task.auto_compose_platform = str(task_data.auto_compose_platform or "wechat").strip().lower() or "wechat"
         db_task.auto_compose_instruction = str(task_data.auto_compose_instruction or "").strip()
         db_task.auto_compose_topk = max(1, int(task_data.auto_compose_topk or 1))
+        db_task.auto_compose_wechat_mode = task_data.auto_compose_wechat_mode if task_data.auto_compose_wechat_mode in ("draft_only", "draft_and_publish") else "draft_only"
         db_task.csdn_publish_enabled = 1 if int(task_data.csdn_publish_enabled or 0) else 0
         db_task.csdn_publish_topk = max(1, int(task_data.csdn_publish_topk or 3))
         db_task.publish_platforms = _json.dumps(task_data.publish_platforms or [], ensure_ascii=False)
         db.commit()
         db.refresh(db_task)
+
+        # 核心逻辑：如果任务状态改变或配置改变，需要同步调度器
+        try:
+            from jobs.mps import stop_job, start_job
+            # 先停止旧任务（无论是否存在）
+            stop_job(task_id)
+            # 如果是开启状态，则重新加入调度器
+            if int(db_task.status or 0) == 1:
+                start_job(task_id)
+        except Exception as e:
+            logger.warning(f"Failed to sync job {task_id} after update: {e}")
+
         return success_response(data=db_task)
     except Exception as e:
         db.rollback()
@@ -400,6 +415,14 @@ async def delete_message_task(
         
         db.delete(db_task)
         db.commit()
+        
+        # 核心修复：从后台调度器彻底停止并移除
+        try:
+            from jobs.mps import stop_job
+            stop_job(task_id)
+        except Exception as e:
+            logger.warning(f"Failed to stop job {task_id} during deletion: {e}")
+
         log_event(logger, E.TASK_SCHEDULE_REMOVE, owner_id=_owner(current_user), task_id=task_id)
         return success_response(message="Message task deleted successfully")
     except Exception as e:

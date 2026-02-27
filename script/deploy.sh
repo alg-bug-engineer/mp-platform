@@ -7,8 +7,8 @@ LOG_DIR="$ROOT_DIR/logs"
 PID_FILE="$PID_DIR/content-studio.pid"
 LOG_FILE="$LOG_DIR/content-studio.log"
 
-PYTHON_BIN="${PYTHON_BIN:-python3}"
-PIP_BIN="${PIP_BIN:-pip3}"
+PYTHON_BIN="${PYTHON_BIN:-/Users/zhangqilai/miniconda3/envs/lc/bin/python}"
+PIP_BIN="${PIP_BIN:-/Users/zhangqilai/miniconda3/envs/lc/bin/pip}"
 NPM_BIN="${NPM_BIN:-npm}"
 
 DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-$ROOT_DIR/.env.deploy}"

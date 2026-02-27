@@ -40,6 +40,7 @@ const formData = ref<MessageTaskCreate & { publish_platforms?: string[] }>({
   auto_compose_platform: 'wechat',
   auto_compose_instruction: '',
   auto_compose_topk: 1,
+  auto_compose_wechat_mode: 'draft_only',
   csdn_publish_enabled: 0,
   csdn_publish_topk: 3,
   task_type: 'crawl',
@@ -113,6 +114,7 @@ const fetchTaskDetail = async (id: string) => {
       auto_compose_platform: String(res.auto_compose_platform || 'wechat'),
       auto_compose_instruction: String(res.auto_compose_instruction || ''),
       auto_compose_topk: Number(res.auto_compose_topk || 1),
+      auto_compose_wechat_mode: String(res.auto_compose_wechat_mode || 'draft_only'),
       csdn_publish_enabled: Number(res.csdn_publish_enabled || 0),
       csdn_publish_topk: Number(res.csdn_publish_topk || 3),
       task_type: taskType.value,
@@ -159,6 +161,7 @@ const handleSubmit = async () => {
       auto_compose_platform: String(formData.value.auto_compose_platform || 'wechat'),
       auto_compose_instruction: String(formData.value.auto_compose_instruction || ''),
       auto_compose_topk: Math.max(1, Number(formData.value.auto_compose_topk || 1)),
+      auto_compose_wechat_mode: ['draft_only', 'draft_and_publish'].includes(formData.value.auto_compose_wechat_mode) ? formData.value.auto_compose_wechat_mode : 'draft_only',
       csdn_publish_topk: Math.max(1, Number(formData.value.csdn_publish_topk || 3)),
       mps_id: JSON.stringify(formData.value.mps_id || []),
     }
@@ -331,6 +334,15 @@ onMounted(() => {
                 </a-checkbox>
               </div>
               <div v-if="platformWechat" class="platform-detail">
+                <a-form-item label="同步模式" style="margin-bottom: 8px">
+                  <a-radio-group v-model="formData.auto_compose_wechat_mode" type="button">
+                    <a-radio value="draft_only">仅同步草稿箱</a-radio>
+                    <a-radio value="draft_and_publish">同步且立即群发</a-radio>
+                  </a-radio-group>
+                  <div v-if="formData.auto_compose_wechat_mode === 'draft_and_publish'" style="margin-top: 6px; color: #f5a623; font-size: 12px;">
+                    ⚠️ 群发后粉丝立即可见且不可撤回，请确认内容无误
+                  </div>
+                </a-form-item>
                 <a-form-item label="创作指令（可选）" style="margin-bottom: 0">
                   <a-textarea
                     v-model="formData.auto_compose_instruction"

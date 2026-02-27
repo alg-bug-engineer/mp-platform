@@ -13,6 +13,9 @@ import re
 from bs4 import BeautifulSoup
 
 from core.image_service import ImageService
+from core.log import get_logger
+
+logger = get_logger(__name__)
 
 
 class WeChatDraftService:
@@ -44,11 +47,18 @@ class WeChatDraftService:
         if self.token and time.time() < self.token_expires_at:
             return self.token
 
+        appid = str(self.app_id or "").strip()
+        secret = str(self.app_secret or "").strip()
+        
+        # 日志记录尝试获取 token（脱敏处理）
+        masked_secret = f"{secret[:4]}***{secret[-4:]}" if len(secret) > 8 else "***"
+        logger.info(f"正在尝试为 AppID: {appid} 获取 access_token, Secret: {masked_secret}")
+
         url = (
             f"https://api.weixin.qq.com/cgi-bin/token"
             f"?grant_type=client_credential"
-            f"&appid={self.app_id}"
-            f"&secret={self.app_secret}"
+            f"&appid={appid}"
+            f"&secret={secret}"
         )
         resp = requests.get(url)
         data = resp.json()
@@ -57,9 +67,10 @@ class WeChatDraftService:
             self.token = data['access_token']
             # 提前 5 分钟过期，防止临界点问题
             self.token_expires_at = time.time() + data['expires_in'] - 300
-            print(f"✅ 获取 Access Token 成功")
+            logger.info(f"✅ 获取 Access Token 成功")
             return self.token
         else:
+            logger.error(f"获取 Token 失败: {data}")
             raise Exception(f"获取 Token 失败: {data}")
 
     def upload_cover_image(self, image_path: Path) -> str:
@@ -96,7 +107,7 @@ class WeChatDraftService:
             result = resp.json()
 
             if 'media_id' in result:
-                print(f"✅ 封面上传成功: {result['media_id']}")
+                logger.info(f"✅ 封面上传成功: {result['media_id']}")
                 return result['media_id']
             else:
                 raise Exception(f"封面上传失败: {result}")
@@ -127,7 +138,7 @@ class WeChatDraftService:
         )
 
         if not compressed_stream:
-            print(f"   ❌ 图片下载或压缩失败: {image_url}")
+            logger.error(f"   ❌ 图片下载或压缩失败: {image_url}")
             return None
 
         try:
@@ -140,11 +151,11 @@ class WeChatDraftService:
             if 'url' in result:
                 return result['url']
             else:
-                print(f"   ❌ 正文图片上传失败: {result}")
+                logger.error(f"   ❌ 正文图片上传失败: {result}")
                 return None
 
         except Exception as e:
-            print(f"   ❌ 上传正文图片异常: {e}")
+            logger.error(f"   ❌ 上传正文图片异常: {e}")
             return None
 
     def process_html_images(self, html_content: str) -> str:
@@ -160,7 +171,7 @@ class WeChatDraftService:
         if not html_content:
             return ""
 
-        print("🔄 开始处理正文图片...")
+        logger.info("🔄 开始处理正文图片...")
         soup = BeautifulSoup(html_content, 'html.parser')
         imgs = soup.find_all('img')
 
@@ -185,11 +196,11 @@ class WeChatDraftService:
                             del img[attr]
                     count += 1
                 else:
-                    print(f"   ⚠️ 图片上传失败，保留原 URL: {src[:60]}...")
+                    logger.warning(f"   ⚠️ 图片上传失败，保留原 URL: {src[:60]}...")
             except Exception as e:
-                print(f"   ❌ 处理图片异常 {src[:60]}...: {e}")
+                logger.error(f"   ❌ 处理图片异常 {src[:60]}...: {e}")
 
-        print(f"✅ 正文图片处理完成，成功替换 {count} 张。")
+        logger.info(f"✅ 正文图片处理完成，成功替换 {count} 张。")
         return str(soup)
 
     @staticmethod
@@ -272,10 +283,38 @@ class WeChatDraftService:
             result = resp.json()
 
             if 'media_id' in result:
-                print(f"🎉 草稿发布成功！Media ID: {result['media_id']}")
+                logger.info(f"🎉 草稿发布成功！Media ID: {result['media_id']}")
                 return result['media_id']
             else:
                 raise Exception(f"草稿提交失败: {result}")
 
         except Exception as e:
             raise Exception(f"提交草稿异常: {e}")
+
+    def freepublish_submit(self, media_id: str) -> str:
+        """
+        提交草稿发布（群发给全体关注用户）
+
+        Args:
+            media_id: 草稿的 media_id（由 submit_draft 返回）
+
+        Returns:
+            publish_id（微信异步任务ID）
+        """
+        token = self.get_access_token()
+        url = f"https://api.weixin.qq.com/cgi-bin/freepublish/submit?access_token={token}"
+        payload = {"media_id": media_id}
+        json_data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers = {"Content-Type": "application/json; charset=utf-8"}
+
+        try:
+            resp = requests.post(url, data=json_data, headers=headers)
+            result = resp.json()
+            errcode = result.get("errcode", 0)
+            if errcode != 0:
+                raise Exception(f"errcode={errcode}, errmsg={result.get('errmsg', '')}")
+            publish_id = result.get("publish_id", "")
+            logger.info(f"群发提交成功！publish_id: {publish_id}")
+            return publish_id
+        except Exception as e:
+            raise Exception(f"群发提交异常: {e}")

@@ -269,9 +269,6 @@ const showAuthQrcode = () => {
   qrcodeRef.value?.startAuth()
 }
 
-provide('showAuthQrcode', showAuthQrcode)
-provide('wxAuthReady', wxAuthReady)
-
 const toggleSidebar = () => {
   navCollapsed.value = !navCollapsed.value
 }
@@ -313,7 +310,7 @@ const consumeRouteNotice = () => {
   router.replace({ path: route.path, query: nextQuery, hash: route.hash })
 }
 
-const fetchUnreadCount = async () => {
+async function fetchUnreadCount() {
   if (!localStorage.getItem('token')) return
   try {
     const res = await getUnreadCount()
@@ -377,6 +374,7 @@ watch(
     consumeRouteNotice()
     fetchRuntime()
     fetchUser()
+    fetchUnreadCount()
   }
 )
 
@@ -385,7 +383,7 @@ onMounted(() => {
   fetchUser()
   consumeRouteNotice()
   fetchUnreadCount()
-  unreadTimer = setInterval(fetchUnreadCount, 60000)
+  unreadTimer = setInterval(fetchUnreadCount, 30000)
 })
 
 onUnmounted(() => {
@@ -394,6 +392,11 @@ onUnmounted(() => {
     unreadTimer = null
   }
 })
+
+// 在脚本末尾统一 provide，确保所有引用已初始化
+provide('showAuthQrcode', showAuthQrcode)
+provide('wxAuthReady', wxAuthReady)
+provide('fetchUnreadCount', fetchUnreadCount)
 </script>
 
 <style scoped>

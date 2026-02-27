@@ -162,7 +162,7 @@ ai:
   # 平台统一 AI 服务配置（前端用户无需填写 API Key）
   provider:
     base_url: ${AI_PROVIDER_BASE_URL:-https://api.moonshot.cn/v1}
-    model_name: ${AI_PROVIDER_MODEL_NAME:-kimi-k2-0711-preview}
+    model_name: ${AI_PROVIDER_MODEL_NAME:-kimi-k2.5}
     api_key: ${AI_PROVIDER_API_KEY:-}
     temperature: ${AI_PROVIDER_TEMPERATURE:-70}
     force_platform: ${AI_PROVIDER_FORCE_PLATFORM:-True}

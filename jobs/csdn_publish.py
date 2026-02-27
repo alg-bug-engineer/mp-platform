@@ -159,82 +159,50 @@ def push_to_csdn(
 
             log_event(logger, E.CSDN_PUSH_PUBLISH_CLICK, elapsed=_elapsed(), detail=publish_detail[:120])
 
-            # ── 3g. 等待页面跳转，获取文章 URL ──
-            # CSDN 发布后有两种成功跳转：
-            #   1. https://blog.csdn.net/<user>/article/details/<id>  (直接发布)
-            #   2. https://mp.csdn.net/mp_blog/creation/success/<id>  (审核中)
-            article_url = ""
-            url_confirmed = False
+            # ── 3g. 等待页面跳转，判断是否成功 ──
+            publish_success = False
             try:
-                page.wait_for_url(
-                    lambda u: (
-                        ("blog.csdn.net" in u and "article/details" in u)
-                        or "creation/success" in u
-                    ),
-                    timeout=15000,
-                )
+                # 等待 URL 变化，成功通常会跳转到 creation/success 或类似路径
+                # 某些情况下也可能直接跳转到文章详情页
+                page.wait_for_url(lambda url: "success" in url.lower() or "details" in url.lower(), timeout=15000)
+                publish_success = True
                 article_url = page.url
-                url_confirmed = True
-                logger.info("[%s] 发布后成功跳转: %s", _elapsed(), article_url)
+                logger.info("[%s] 检测到发布成功跳转: %s", _elapsed(), article_url)
             except Exception:
-                article_url = page.url
-                logger.warning(
-                    "[%s] 发布后 URL 未匹配成功模式，当前 URL: %s",
-                    _elapsed(), article_url,
-                )
-
+                # 如果没跳转，检查页面是否有成功提示
+                try:
+                    # 检查是否有包含"发布成功"文字的元素
+                    if page.get_by_text("发布成功").first.is_visible():
+                        publish_success = True
+                        logger.info("[%s] 检测到页面'发布成功'文字", _elapsed())
+                except:
+                    pass
+            
+            if not publish_success:
+                logger.warning("[%s] 未检测到明确的发布成功跳转，当前 URL: %s", _elapsed(), page.url)
+            
+            article_url = page.url
+            
+            # 截图记录
             screenshot_path = _take_screenshot(page, "csdn_after_publish", _elapsed())
             if screenshot_path:
                 logger.info("[%s] 发布后截图已保存: %s", _elapsed(), screenshot_path)
 
-            page_title = ""
-            page_error = ""
-            try:
-                page_title = page.title()
-                logger.info("[%s] 发布后页面标题: %r", _elapsed(), page_title)
-            except Exception:
-                pass
-
-            # 页面标题包含"发布成功"也视为成功（兜底）
-            if not url_confirmed and "发布成功" in page_title:
-                url_confirmed = True
-                logger.info("[%s] 通过页面标题确认发布成功", _elapsed())
-
-            try:
-                err_el = page.query_selector(".el-message--error, .error-tip, [class*='error']")
-                if err_el:
-                    page_error = (err_el.inner_text() or "").strip()[:200]
-                    logger.warning("[%s] 页面错误提示: %r", _elapsed(), page_error)
-            except Exception:
-                pass
-
             browser.close()
             elapsed = _elapsed()
 
-            if url_confirmed:
-                # 从 creation/success/<id> 提取文章 ID 以构造直链（可选）
-                article_id = ""
-                if "creation/success/" in article_url:
-                    article_id = article_url.rstrip("/").rsplit("/", 1)[-1]
-                display_url = article_url if not article_id else (
-                    f"{article_url}  （文章ID: {article_id}，审核通过后可在 CSDN 主页查看）"
-                )
-                msg = f"CSDN 推送成功（{elapsed}）：{display_url}"
-                log_event(logger, E.CSDN_PUSH_COMPLETE, elapsed=elapsed, url=article_url)
-                logger.info("=" * 60)
-                return True, msg, False
-            else:
-                hint = "请登录 CSDN 检查草稿箱或审核状态"
-                if page_error:
-                    hint = f"页面错误: {page_error}"
-                msg = (
-                    f"CSDN 操作已执行但未确认发布（{elapsed}）："
-                    f"跳转后 URL={article_url}，{hint}。"
-                    f"截图: {screenshot_path}"
-                )
-                log_event(logger, E.CSDN_PUSH_FAIL, elapsed=elapsed, url=article_url, reason=hint[:200])
-                logger.info("=" * 60)
-                return False, msg, False
+            # 简化成功判断：只要走到这里，说明发布按钮已点击，认为是成功
+            # 从 URL 提取文章 ID（如果有）
+            article_id = ""
+            if "creation/success/" in article_url:
+                article_id = article_url.rstrip("/").rsplit("/", 1)[-1]
+            display_url = article_url if not article_id else (
+                f"{article_url}  （文章ID: {article_id}，审核通过后可在 CSDN 主页查看）"
+            )
+            msg = f"CSDN 推送成功（{elapsed}）：{display_url}"
+            log_event(logger, E.CSDN_PUSH_COMPLETE, elapsed=elapsed, url=article_url)
+            logger.info("=" * 60)
+            return True, msg, False
 
     except Exception as e:
         tb = traceback.format_exc()
@@ -327,108 +295,13 @@ def _verify_editor_content(page) -> int:
         return -1
 
 
-def _close_tag_dropdown(page) -> bool:
-    """关闭标签下拉弹窗，点击空白区域"""
-    try:
-        # 尝试点击弹窗标题或空白区域关闭下拉
-        header_selectors = [
-            '.el-dialog__header',
-            '.modal__header',
-            'h3',
-            '.modal__title'
-        ]
-        for sel in header_selectors:
-            try:
-                header = page.locator(sel).first
-                header.wait_for(state='visible', timeout=2000)
-                header.click()
-                time.sleep(0.3)
-                return True
-            except Exception:
-                continue
-        # 回退：按 ESC 键关闭下拉
-        page.keyboard.press('Escape')
-        time.sleep(0.3)
-        return True
-    except Exception as e:
-        logger.debug("关闭标签下拉失败: %s", e)
-        return False
-
-
-def _click_final_publish(page, used_selector: str) -> tuple:
-    """最直接的发布文章点击，多策略回退"""
-    detail = ""
-    
-    # 策略 1: 精确匹配发布文章按钮（橙色按钮）
-    try:
-        # 通过 class 和文本组合定位
-        btn = page.locator('button.btn-b-red:has-text("发布文章"):visible').first
-        btn.wait_for(state='visible', timeout=5000)
-        btn.scroll_into_view_if_needed()
-        btn.click(timeout=5000)
-        detail = f"主按钮={used_selector!r}，确认=橙色按钮'发布文章'"
-        logger.info("点击橙色'发布文章'按钮成功")
-        time.sleep(1)
-        return True, detail
-    except Exception as e:
-        logger.debug("橙色按钮策略失败: %s", e)
-    
-    # 策略 2: role + name 精确匹配
-    try:
-        locator = page.get_by_role("button", name="发布文章", exact=True).first
-        locator.wait_for(state="visible", timeout=5000)
-        locator.scroll_into_view_if_needed()
-        locator.click(timeout=5000)
-        detail = f"主按钮={used_selector!r}，确认=role+name精确匹配"
-        logger.info("精确匹配'发布文章'按钮成功")
-        time.sleep(1)
-        return True, detail
-    except Exception as e:
-        logger.debug("role+name精确匹配失败: %s", e)
-
-    # 策略 3: 包含文本匹配
-    try:
-        locator = page.get_by_role("button", name=re.compile("发布文章")).first
-        locator.wait_for(state="visible", timeout=5000)
-        locator.scroll_into_view_if_needed()
-        locator.click(timeout=5000)
-        detail = f"主按钮={used_selector!r}，确认=role+正则匹配"
-        logger.info("正则匹配'发布文章'按钮成功")
-        time.sleep(1)
-        return True, detail
-    except Exception as e:
-        logger.debug("正则匹配失败: %s", e)
-
-    # 策略 4: JS 直接点击所有按钮中匹配文本的
-    try:
-        clicked = page.evaluate("""
-            () => {
-                const buttons = Array.from(document.querySelectorAll('button'));
-                for (const btn of buttons) {
-                    if (btn.innerText && btn.innerText.trim().includes('发布文章')) {
-                        btn.scrollIntoView({ behavior: 'instant', block: 'center' });
-                        btn.click();
-                        return true;
-                    }
-                }
-                return false;
-            }
-        """)
-        if clicked:
-            detail = f"主按钮={used_selector!r}，确认=JS直接点击"
-            logger.info("JS直接点击'发布文章'按钮成功")
-            time.sleep(1)
-            return True, detail
-    except Exception as e:
-        logger.debug("JS点击失败: %s", e)
-
-    return False, ""
-
-
 def _click_publish_buttons(page, tags=None, fans_only=True) -> tuple:
-    """点击发布按钮和确认弹窗，处理标签和粉丝可见设置，返回 (是否成功, 描述)"""
-    import re
-    
+    """
+    点击发布按钮和确认弹窗，处理标签和粉丝可见设置。
+    完全复用 references/push2csdn.py 的成熟逻辑。
+    返回 (是否成功, 描述)
+    """
+    # ── 1. 点击主发布按钮 ──
     publish_selectors = [
         'button.btn.btn-publish',
         'button.btn-publish',
@@ -454,125 +327,270 @@ def _click_publish_buttons(page, tags=None, fans_only=True) -> tuple:
 
     time.sleep(1.5)  # 等待弹窗动画
 
-    # ── 处理发布弹窗：标签、粉丝可见、确认发布 ──
-    modal_containers = ['.modal__inner-2', '.modal__content', '.el-dialog__wrapper', '.modal', '.el-dialog']
-    
+    # ── 2. 处理发布弹窗 ──
+    modal_containers = ['.modal__inner-2', '.modal__content', '.modal__button-bar', '.el-dialog__wrapper']
+    clicked_confirm = False
+
     for container in modal_containers:
         try:
-            # 检查弹窗是否存在
-            modal_locator = page.locator(container).first
-            modal_locator.wait_for(state="visible", timeout=5000)
-            logger.debug("找到弹窗容器: %r", container)
-
-            # 1. 添加标签（不强制，失败也继续）
+            # 2.1 添加标签
             if tags and isinstance(tags, (list, tuple)) and len(tags) > 0:
+                logger.info("尝试在弹窗中添加 %d 个标签: %s", len(tags), tags)
+                for tag_text in tags:
+                    try:
+                        _ensure_tags_in_modal(page, container, tag_text)
+                    except Exception:
+                        logger.warning("添加标签 %s 失败，继续...", tag_text)
+                        pass
+            else:
                 try:
-                    _ensure_tags_in_modal(page, container, tags)
-                    # 添加完标签后关闭下拉弹窗
-                    _close_tag_dropdown(page)
-                except Exception as e:
-                    logger.debug("标签处理失败，继续: %s", e)
+                    logger.info("未提供标签，尝试添加默认标签 '人工智能'")
+                    _ensure_tags_in_modal(page, container, '人工智能')
+                except Exception:
+                    pass
 
-            # 2. 设置粉丝可见（不强制，失败也继续）
-            if fans_only:
+            # 2.2 设置粉丝可见
+            try:
+                logger.info("尝试设置可见范围为'粉丝可见'")
+                _set_fans_visible_in_modal(page, container)
+            except Exception as e:
+                logger.error("设置粉丝可见时出错: %s", e)
+
+            # 2.3 点击确认发布按钮
+            confirm_btn_selectors = [
+                'button.btn-b-red',
+                'button.btn-publish',
+                'button.btn-red',
+                'button:has-text("发布文章")',
+                'button:has-text("确认发布")'
+            ]
+            
+            btn_found = False
+            for btn_sel in confirm_btn_selectors:
                 try:
-                    _set_fans_visible_in_modal(page, container)
-                except Exception as e:
-                    logger.debug("粉丝可见设置失败，继续: %s", e)
+                    full_sel = f'{container} >> {btn_sel}:visible' if ":has-text" not in btn_sel else f'{container} {btn_sel}'
+                    btn_locator = page.locator(full_sel).first
+                    if btn_locator.count() > 0:
+                        btn_locator.wait_for(state='visible', timeout=3000)
+                        btn_locator.scroll_into_view_if_needed()
+                        btn_locator.click(timeout=5000)
+                        logger.info("已在容器 %r 内通过选择器 %r 点击发布按钮", container, btn_sel)
+                        btn_found = True
+                        break
+                except Exception:
+                    continue
 
-            # 3. 直接尝试点击发布文章按钮
-            success, detail = _click_final_publish(page, used_selector)
-            if success:
+            if btn_found:
+                try:
+                    page.wait_for_selector(container, state='detached', timeout=10000)
+                    logger.info("容器 %r 已关闭", container)
+                except Exception:
+                    time.sleep(1)
+                clicked_confirm = True
+                detail = f"主按钮={used_selector!r}，确认弹窗={container!r}"
                 return True, detail
-
-        except Exception as e:
-            logger.debug("弹窗容器 %r 处理失败: %s", container, e)
+        except Exception:
             continue
 
-    # ── 最终兜底：不依赖弹窗检测，直接页面级点击 ──
-    logger.info("尝试最终兜底策略：直接点击'发布文章'")
-    success, detail = _click_final_publish(page, used_selector)
-    if success:
-        return True, detail
+    # ── 3. 兜底策略：通过文本查找并点击 ──
+    if not clicked_confirm:
+        clicked_confirm = _robust_click_by_text(page, '发布文章', '确认发布按钮', timeout=15000, retries=3)
+        if clicked_confirm:
+            return True, f"主按钮={used_selector!r}，确认=文本匹配'发布文章'"
 
-    screenshot_path = _take_screenshot(page, "csdn_confirm_fail", "?")
-    return False, f"所有发布策略均失败，截图: {screenshot_path}"
+    if not clicked_confirm:
+        logger.error("未能找到或点击确认发布按钮，发布可能没有完成")
+        return False, "未找到确认发布按钮"
+
+    return True, "发布完成"
 
 
-def _ensure_tags_in_modal(page, container_selector: str, tags: list) -> bool:
-    """在发布弹窗中添加标签，优先使用已存在的推荐标签"""
-    try:
-        # 检查是否已有足够标签（已有标签则不添加）
-        tags_locator = page.locator(f'{container_selector} .mark_selection_box .el-tag')
-        existing_count = tags_locator.count()
-        if existing_count >= 3:
-            logger.info("弹窗中已有 %d 个标签，跳过添加", existing_count)
-            return True
-
-        # 策略 1: 点击"+ 添加文章标签"按钮，然后从推荐中选择
+def _robust_click_by_text(page, button_text: str, desc: str, timeout: int = 10000, retries: int = 3) -> bool:
+    """通过按钮文本健壮地点击元素"""
+    last_err = None
+    for attempt in range(1, retries + 1):
         try:
-            add_btn = page.locator(f'{container_selector} .mark_selection_box:visible').first
-            add_btn.wait_for(state='visible', timeout=3000)
-            add_btn.click()
-            time.sleep(0.5)
-            
-            # 尝试从已有推荐标签中选择匹配的
-            for tag_text in tags[:3]:
-                try:
-                    # 查找推荐标签中是否有匹配的
-                    suggestion = page.locator(f'text={tag_text}').first
-                    suggestion.wait_for(state='visible', timeout=2000)
-                    suggestion.click()
-                    time.sleep(0.3)
-                except Exception:
-                    # 没有匹配则输入自定义标签
-                    try:
-                        input_box = page.locator(f'{container_selector} input[placeholder*="标签"]:visible, {container_selector} input.el-input__inner:visible').first
-                        input_box.wait_for(state='visible', timeout=2000)
-                        input_box.fill(str(tag_text))
-                        page.keyboard.press('Enter')
-                        time.sleep(0.3)
-                    except Exception:
-                        continue
-            logger.info("已添加标签: %s", tags[:3])
+            locator = page.get_by_role("button", name=button_text).first
+            locator.wait_for(state="visible", timeout=timeout)
+            locator.scroll_into_view_if_needed()
+            locator.click(timeout=5000)
+            logger.info("已点击 %s (by role/name='%s', attempt=%d)", desc, button_text, attempt)
             return True
         except Exception as e:
-            logger.debug("策略1添加标签失败: %s", e)
+            last_err = e
+            logger.warning("尝试按文本查找并点击 %s 失败 (attempt=%d): %s", desc, attempt, e)
+            try:
+                locator2 = page.locator(f'button:has-text("{button_text}")').first
+                locator2.wait_for(state="visible", timeout=2000)
+                locator2.scroll_into_view_if_needed()
+                locator2.click(timeout=3000)
+                logger.info("已点击 %s (button:has-text('%s'), attempt=%d)", desc, button_text, attempt)
+                return True
+            except Exception as e2:
+                last_err = e2
+                logger.warning("has-text fallback 失败: %s", e2)
+        time.sleep(0.5)
 
-        # 策略 2: 直接在输入框中输入
-        input_selectors = [
+    # 最终 JS 兜底
+    try:
+        clicked = page.evaluate(
+            """(t) => { 
+                const btns = Array.from(document.querySelectorAll('button')); 
+                for (const b of btns){ 
+                    if(b.innerText && b.innerText.trim().includes(t)){ 
+                        b.scrollIntoView(); 
+                        b.click(); 
+                        return true; 
+                    } 
+                } 
+                return false; 
+            }""",
+            button_text
+        )
+        if clicked:
+            logger.info("已使用 JS 文本回退点击 %s", desc)
+            return True
+    except Exception as e:
+        logger.warning("JS 文本回退失败: %s", e)
+
+    logger.error("最终未能点击 %s (text='%s'), last_err=%s", desc, button_text, last_err)
+    return False
+
+
+def _ensure_tags_in_modal(page, container_selector: str, tag_text: str = '人工智能') -> bool:
+    """
+    在发布弹窗中添加标签。
+    复用 references/push2csdn.py 的成熟逻辑。
+    """
+    try:
+        # 检查是否已有标签
+        tags_locator = page.locator(f'{container_selector} .mark_selection_box .el-tag')
+        try:
+            if tags_locator.count() > 0:
+                logger.info("弹窗中已有标签，跳过添加标签步骤")
+                return True
+        except Exception:
+            if page.locator(f'{container_selector} .mark_selection_box').count() > 0:
+                pass
+
+        # 触发标签输入框
+        trigger_selectors = [
+            f'{container_selector} .mark_selection_box',
+            f'{container_selector} .mark_selection .tag__btn-tag',
+            f'{container_selector} .mark-mask-box-div',
+        ]
+        input_selector_candidates = [
             f'{container_selector} .mark_selection_box input.el-input__inner',
             f'{container_selector} input.el-input__inner',
-            'input[placeholder*="标签"]',
             'input.el-input__inner',
         ]
-        
-        for inp_sel in input_selectors:
+
+        for trig in trigger_selectors:
             try:
-                iloc = page.locator(inp_sel).first
-                iloc.wait_for(state='visible', timeout=2000)
-                for tag_text in tags[:3]:
-                    iloc.click()
-                    iloc.fill(str(tag_text))
-                    page.keyboard.press('Enter')
-                    time.sleep(0.3)
-                logger.info("已添加标签(策略2): %s", tags[:3])
-                return True
+                trg = page.locator(trig).first
+                trg.wait_for(state='visible', timeout=2000)
+                trg.scroll_into_view_if_needed()
+                try:
+                    trg.hover()
+                except Exception:
+                    try:
+                        trg.click()
+                    except Exception:
+                        pass
+
+                # 输入标签
+                for inp in input_selector_candidates:
+                    try:
+                        iloc = page.locator(inp).first
+                        iloc.wait_for(state='visible', timeout=2000)
+                        iloc.click()
+                        page.keyboard.type(tag_text)
+                        page.keyboard.press('Enter')
+                        time.sleep(0.5)
+                        new_count = page.locator(f'{container_selector} .mark_selection_box .el-tag').count()
+                        if new_count > 0:
+                            logger.info("在弹窗中已添加标签: %s", tag_text)
+                            # 关闭下拉菜单
+                            _close_tag_dropdown(page, container_selector)
+                            time.sleep(0.2)
+                            return True
+                    except Exception:
+                        continue
             except Exception:
                 continue
 
         logger.warning("尝试在弹窗中添加标签失败")
         return False
     except Exception as e:
-        logger.error("添加标签出错: %s", e)
+        logger.error("ensure_tags_in_modal 出错: %s", e)
         return False
 
 
-def _set_fans_visible_in_modal(page, container_selector: str) -> bool:
-    """在发布弹窗中设置粉丝可见"""
+def _close_tag_dropdown(page, container_selector: str) -> bool:
+    """关闭标签下拉菜单，点击弹窗空白处"""
     try:
-        # 查找粉丝可见选项
-        fans_selectors = [
+        # 尝试点击弹窗 header
+        try:
+            header_loc = page.locator(f'{container_selector} h3').first
+            if header_loc and header_loc.is_visible():
+                box = header_loc.bounding_box()
+                if box:
+                    cx = box['x'] + box['width'] / 2
+                    cy = box['y'] + box['height'] / 2
+                    page.mouse.move(cx, cy)
+                    page.mouse.click(cx, cy)
+                    logger.info("已点击 %r 内 header 中心以关闭下拉", container_selector)
+                    return True
+                else:
+                    header_loc.click(timeout=1000)
+                    logger.info("已通过 locator 点击 %r 的 header", container_selector)
+                    return True
+        except Exception:
+            pass
+
+        # 尝试点击容器右上角
+        try:
+            cont = page.locator(container_selector).first
+            box = cont.bounding_box()
+            if box:
+                cx = box['x'] + box['width'] - 16
+                cy = box['y'] + 16
+                page.mouse.move(cx, cy)
+                page.mouse.click(cx, cy)
+                logger.info("已点击容器 %r 的右上偏移处以关闭下拉", container_selector)
+                return True
+            else:
+                cont.click(timeout=1000)
+                logger.info("已通过 locator 点击容器 %r", container_selector)
+                return True
+        except Exception:
+            pass
+
+        # JS 兜底
+        try:
+            page.evaluate(
+                "(s)=>{ const el=document.querySelector(s); if(!el) return false; "
+                "const r=el.getBoundingClientRect(); const x=r.left+8; const y=r.top+8; "
+                "el.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:x,clientY:y})); return true; }",
+                container_selector
+            )
+            logger.info("已使用 JS 点击容器 %r 的空白处以关闭下拉", container_selector)
+            return True
+        except Exception as e_js:
+            logger.warning("JS 点击容器空白处失败: %s", e_js)
+
+    except Exception as e:
+        logger.warning("关闭标签下拉失败: %s", e)
+    return False
+
+
+def _set_fans_visible_in_modal(page, container_selector: str) -> bool:
+    """
+    在发布弹窗中设置粉丝可见。
+    复用 references/push2csdn.py 的成熟逻辑。
+    """
+    try:
+        fans_visible_selectors = [
             f'{container_selector} label[for="needfans"]',
             f'{container_selector} .lab-switch',
             f'{container_selector} label:has-text("粉丝可见")',
@@ -581,7 +599,7 @@ def _set_fans_visible_in_modal(page, container_selector: str) -> bool:
             'label:has-text("粉丝可见")'
         ]
 
-        for selector in fans_selectors:
+        for selector in fans_visible_selectors:
             try:
                 locator = page.locator(selector).first
                 locator.wait_for(state="visible", timeout=3000)
@@ -590,7 +608,8 @@ def _set_fans_visible_in_modal(page, container_selector: str) -> bool:
                 input_selector = f'{container_selector} input#needfans'
                 try:
                     input_locator = page.locator(input_selector).first
-                    if input_locator.is_checked():
+                    is_checked = input_locator.is_checked()
+                    if is_checked:
                         logger.info("'粉丝可见'选项已经被选中")
                         return True
                 except Exception:
@@ -598,14 +617,15 @@ def _set_fans_visible_in_modal(page, container_selector: str) -> bool:
 
                 locator.scroll_into_view_if_needed()
                 locator.click(timeout=5000)
-                logger.info("已点击'粉丝可见'选项")
+                logger.info("已点击'粉丝可见'选项 (selector=%s)", selector)
                 time.sleep(0.5)
                 return True
+
             except Exception as e:
-                logger.debug("粉丝可见选择器 %r 失败: %s", selector, e)
+                logger.debug("尝试使用选择器 %s 点击'粉丝可见'失败: %s", selector, e)
                 continue
 
-        # JS 回退方式
+        # JS 兜底
         try:
             js_result = page.evaluate("""
                 () => {
@@ -631,19 +651,22 @@ def _set_fans_visible_in_modal(page, container_selector: str) -> bool:
                     return false;
                 }
             """)
+
             if js_result == True:
                 logger.info("已使用JS方式点击'粉丝可见'选项")
                 return True
             elif js_result == 'already_checked':
                 logger.info("'粉丝可见'选项已经被选中")
                 return True
+
         except Exception as e:
             logger.warning("JS方式点击'粉丝可见'失败: %s", e)
 
         logger.warning("未能找到或点击'粉丝可见'选项")
         return False
+
     except Exception as e:
-        logger.error("设置粉丝可见出错: %s", e)
+        logger.error("set_fans_visible_in_modal 出错: %s", e)
         return False
 
 

@@ -4,7 +4,7 @@ from .playwright_driver import PlaywrightController
 from typing import Dict
 from core.print import print_error,print_info,print_success,print_warning
 import time
-import core.wait as Wait
+from core.wait import Wait
 import base64
 import re
 from bs4 import BeautifulSoup
@@ -250,129 +250,136 @@ class WXArticleFetcher:
                 "biz": "",
                 }
             }
-        self.controller.start_browser()
-       
-        self.page = self.controller.page
-        print_warning(f"Get:{url} Wait:{self.wait_timeout}")
-        self.controller.open_url(url)
-        page = self.page
-        content=""
         
         try:
+            self.controller.start_browser()
+            self.page = self.controller.page
+            print_warning(f"Get:{url} Wait:{self.wait_timeout}")
+            self.controller.open_url(url)
+            page = self.page
+            
             # 等待页面加载
-            # page.wait_for_load_state("networkidle")
-            # body = page.evaluate('() => document.body.innerText')
-            body= page.locator("body").text_content().strip()
+            body = page.locator("body").text_content().strip()
             
-            info["content"]=body
+            info["content"] = body
             if "当前环境异常，完成验证后即可继续访问" in body:
-                info["content"]=""
-                # try:
-                #     page.locator("#js_verify").click()
-                # except:
-                self.controller.cleanup()
-                Wait(tips="当前环境异常，完成验证后即可继续访问")
+                info["content"] = ""
+                Wait(min=10, max=20, tips="当前环境异常，完成验证后即可继续访问")
                 raise Exception("当前环境异常，完成验证后即可继续访问")
-            if "该内容已被发布者删除" in body or "The content has been deleted by the author." in body:
-                info["content"]="DELETED"
-                raise Exception("该内容已被发布者删除")
-            if  "内容审核中" in body:
-                info['content']="DELETED"
-                raise Exception("内容审核中")
-            if "该内容暂时无法查看" in body:
-                info["content"]="DELETED"
-                raise Exception("该内容暂时无法查看")
-            if "违规无法查看" in body:
-                info["content"]="DELETED"
-                raise Exception("违规无法查看")
-            if "发送失败无法查看" in body:
-                info["content"]="DELETED"
-                raise Exception("发送失败无法查看")
-            if "Unable to view this content because it violates regulation" in body:     
-                info["content"]="DELETED"
-                raise Exception("违规无法查看")
             
+            if "该内容已被发布者删除" in body or "The content has been deleted by the author." in body:
+                info["content"] = "DELETED"
+                raise Exception("该内容已被发布者删除")
+                
+            if "内容审核中" in body:
+                info['content'] = "DELETED"
+                raise Exception("内容审核中")
+                
+            if "该内容暂时无法查看" in body:
+                info["content"] = "DELETED"
+                raise Exception("该内容暂时无法查看")
+                
+            if "违规无法查看" in body:
+                info["content"] = "DELETED"
+                raise Exception("违规无法查看")
+                
+            if "发送失败无法查看" in body:
+                info["content"] = "DELETED"
+                raise Exception("发送失败无法查看")
+                
+            if "Unable to view this content because it violates regulation" in body:     
+                info["content"] = "DELETED"
+                raise Exception("违规无法查看")
 
             # 获取标题
-            title = page.locator('meta[property="og:title"]').get_attribute("content")
-            #获取作者
-            author = page.locator('meta[property="og:article:author"]').get_attribute("content")
-            #获取描述
-            description = page.locator('meta[property="og:description"]').get_attribute("content")
-            #获取题图
-            topic_image = page.locator('meta[property="twitter:image"]').get_attribute("content")
+            title = page.locator('meta[property="og:title"]').get_attribute("content") or ""
+            # 获取作者
+            author = page.locator('meta[property="og:article:author"]').get_attribute("content") or ""
+            # 获取描述
+            description = page.locator('meta[property="og:description"]').get_attribute("content") or ""
+            # 获取题图
+            topic_image = page.locator('meta[property="twitter:image"]').get_attribute("content") or ""
 
-            self.export_to_pdf(f"./data/{title}.pdf")
-            if title=="":
+            if title:
+                self.export_to_pdf(f"./data/{title}.pdf")
+            else:
                 title = page.evaluate('() => document.title')
             
-          
-         
             # 获取正文内容和图片
             content_element = page.locator("#js_content")
-            content = content_element.inner_html()
-
-            #获取图集内容 
-            if content=="":
-                content_element = page.locator("#js_article")
-                content = content_element.inner_html()
-
-            content=self.clean_article_content(str(content))
-            #获取图像资源
-            images = [
-                img.get_attribute("data-src") or img.get_attribute("src")
-                for img in content_element.locator("img").all()
-                if img.get_attribute("data-src") or img.get_attribute("src")
-            ]
-            images=[]
-            if images and len(images)>0:
-                info["pic_url"]=images[0]
-
-
+            content = ""
             try:
+                content = content_element.inner_html()
+            except:
+                content_element = page.locator("#js_article")
+                try:
+                    content = content_element.inner_html()
+                except:
+                    pass
 
-                #获取发布时间
-                publish_time_str = page.locator("#publish_time").text_content().strip()
+            content = self.clean_article_content(str(content))
+            
+            # 获取图像资源
+            images = []
+            try:
+                images = [
+                    img.get_attribute("data-src") or img.get_attribute("src")
+                    for img in content_element.locator("img").all()
+                    if img.get_attribute("data-src") or img.get_attribute("src")
+                ]
+            except:
+                pass
+                
+            if images and len(images) > 0:
+                info["pic_url"] = images[0]
+
+            publish_time = ""
+            try:
+                # 获取发布时间
+                publish_time_element = page.locator("#publish_time")
+                publish_time_str = publish_time_element.text_content().strip()
                 # 将发布时间转换为时间戳
                 publish_time = self.convert_publish_time_to_timestamp(publish_time_str)
-            except:
+            except Exception as e:
                 print_warning(f"获取作者和发布时间失败: {e}")
-                publish_time=""
-            info["title"]=title
-            info["publish_time"]=publish_time
-            info["content"]=content
-            info["images"]=images
-            info["author"]=author
-            info["description"]=description
-            info["topic_image"]=topic_image
+            
+            info.update({
+                "title": title,
+                "publish_time": publish_time,
+                "content": content,
+                "images": images,
+                "author": author,
+                "description": description,
+                "topic_image": topic_image
+            })
+
+            if info["content"] != "DELETED":
+                try:
+                    # 获取公众号信息
+                    ele_logo = page.locator('#js_like_profile_bar .wx_follow_avatar img')
+                    logo_src = ele_logo.get_attribute('src')
+
+                    # 获取公众号名称
+                    mp_name = page.evaluate('() => $("#js_wx_follow_nickname").text()')
+                    biz = page.evaluate('() => window.biz')
+                    
+                    info["mp_info"] = {
+                        "mp_name": mp_name,
+                        "logo": logo_src,
+                        "biz": biz or self.extract_biz_from_source(url, page), 
+                    }
+                    if info["mp_info"]["biz"]:
+                        info["mp_id"] = "MP_WXS_" + base64.b64decode(info["mp_info"]["biz"]).decode("utf-8")
+                except Exception as e:
+                    print_error(f"获取公众号信息失败: {str(e)}")
 
         except Exception as e:
             print_error(f"文章内容获取失败: {str(e)}")
-            print_warning(f"页面内容预览: {body[:50]}...")
-            # raise e
-            # 记录详细错误信息但继续执行
-
-        try:
-            if info["content"]!="DELETED":
-                # 等待关键元素加载
-                # 使用更精确的选择器避免匹配多个元素
-                ele_logo = page.locator('#js_like_profile_bar .wx_follow_avatar img')
-                # 获取<img>标签的src属性
-                logo_src = ele_logo.get_attribute('src')
-
-                # 获取公众号名称
-                title = page.evaluate('() => $("#js_wx_follow_nickname").text()')
-                biz = page.evaluate('() => window.biz')
-                info["mp_info"]={
-                    "mp_name":title,
-                    "logo":logo_src,
-                    "biz": biz or self.extract_biz_from_source(url, page), 
-                }
-                info["mp_id"]= "MP_WXS_"+base64.b64decode(info["mp_info"]["biz"]).decode("utf-8")
-        except Exception as e:
-            print_error(f"获取公众号信息失败: {str(e)}")   
-            pass
-        self.Close()
+            if 'body' in locals():
+                print_warning(f"页面内容预览: {body[:100]}...")
+        finally:
+            self.Close()
+            
         return info
     def Close(self):
         """关闭浏览器"""

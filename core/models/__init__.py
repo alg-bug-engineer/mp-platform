@@ -19,5 +19,6 @@ from .analytics_event import AnalyticsEvent
 from .message_task_log import MessageTaskLog
 from .user_notice import UserNotice
 from .csdn_auth import CsdnAuth
+from .platform_publish_record import PlatformPublishRecord
 # 导入基础模型
 from .base import *

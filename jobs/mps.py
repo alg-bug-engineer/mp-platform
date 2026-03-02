@@ -121,6 +121,54 @@ def _topk_articles_for_feeds(session, owner_id: str, feed_ids: list[str], k: int
     ).limit(k).all()
 
 
+def _is_title_published(session, owner_id: str, platform: str, title: str) -> bool:
+    """跨任务查询：指定账号+平台是否已推送过该标题。"""
+    import hashlib
+    from core.models.platform_publish_record import PlatformPublishRecord
+
+    title_norm = str(title or "").strip().lower()
+    if not title_norm:
+        return False
+    title_hash = hashlib.md5(title_norm.encode("utf-8")).hexdigest()
+    return session.query(PlatformPublishRecord).filter(
+        PlatformPublishRecord.owner_id == owner_id,
+        PlatformPublishRecord.platform == platform,
+        PlatformPublishRecord.title_hash == title_hash,
+    ).first() is not None
+
+
+def _record_title_published(session, owner_id: str, platform: str, title: str,
+                             article_id: str = "", task_id: str = "") -> None:
+    """记录该标题已在指定平台推送，幂等（重复插入时静默跳过）。"""
+    import hashlib
+    import uuid
+    from core.models.platform_publish_record import PlatformPublishRecord
+
+    title_norm = str(title or "").strip().lower()
+    if not title_norm:
+        return
+    title_hash = hashlib.md5(title_norm.encode("utf-8")).hexdigest()
+    existing = session.query(PlatformPublishRecord).filter(
+        PlatformPublishRecord.owner_id == owner_id,
+        PlatformPublishRecord.platform == platform,
+        PlatformPublishRecord.title_hash == title_hash,
+    ).first()
+    if existing:
+        return
+    record = PlatformPublishRecord(
+        id=str(uuid.uuid4()),
+        owner_id=owner_id,
+        platform=platform,
+        title=str(title or "")[:500],
+        title_hash=title_hash,
+        article_id=str(article_id or ""),
+        task_id=str(task_id or ""),
+        created_at=datetime.now(),
+    )
+    session.add(record)
+    session.commit()
+
+
 def _run_auto_compose_sync(task: MessageTask, mps: list[Feed]) -> str:
     enabled = int(getattr(task, "auto_compose_sync_enabled", 0) or 0)
     if enabled != 1:
@@ -202,6 +250,27 @@ def _run_auto_compose_sync(task: MessageTask, mps: list[Feed]) -> str:
 
         mp = feed_map.get(str(article.mp_id or "").strip())
         mp_name = getattr(mp, "mp_name", "未知公众号") if mp else "未知公众号"
+
+        # ── 跨任务标题去重：同一账号+平台，相同标题只推送一次 ──
+        wechat_title = str(article.title or "").strip()
+        wechat_article_id_str = str(article.id or "").strip()
+        if wechat_title and _is_title_published(session, owner_id, "wechat", wechat_title):
+            msg = f"标题《{wechat_title[:40]}》已在微信平台推送过（其他任务），跳过"
+            logger.info("任务(%s)[%s] %s", task.id, mp_name, msg)
+            # 同时将该文章 ID 记入本任务已发布列表
+            if wechat_article_id_str and wechat_article_id_str not in published_ids:
+                from core.models.message_task import MessageTask as MessageTaskModelW
+                import json as _json_w
+                new_pub_ids = list(published_ids) + [wechat_article_id_str]
+                session.query(MessageTaskModelW).filter(
+                    MessageTaskModelW.id == str(task.id or ""),
+                    MessageTaskModelW.owner_id == owner_id,
+                ).update(
+                    {MessageTaskModelW.auto_compose_published_ids: _json_w.dumps(new_pub_ids, ensure_ascii=False)},
+                    synchronize_session=False,
+                )
+                session.commit()
+            return msg
 
         user = session.query(DBUser).filter(DBUser.username == owner_id).first()
         if not user:
@@ -328,6 +397,15 @@ def _run_auto_compose_sync(task: MessageTask, mps: list[Feed]) -> str:
         )
 
         consume_ai_usage(user, image_count=0)
+        # ── 跨任务标题去重记录（无论成功与否均记录，避免其他任务重复推送）──
+        if wechat_title:
+            try:
+                _record_title_published(
+                    session, owner_id, "wechat", wechat_title,
+                    article_id=wechat_article_id_str, task_id=str(task.id or ""),
+                )
+            except Exception as _e:
+                logger.warning("任务(%s)[%s] 记录跨任务标题去重失败: %s", task.id, mp_name, _e)
         if synced:
             new_published_ids = list(published_ids)
             article_id_str = str(article.id or "").strip()
@@ -515,6 +593,24 @@ def _run_csdn_publish_sync(task: MessageTask, mps: list[Feed]) -> str:
             task.id, mp_name, article_id_str, title[:50], len(source_content),
         )
 
+        # ── 跨任务标题去重：同一账号+平台，相同标题只推送一次 ──
+        if title and _is_title_published(session, owner_id, "csdn", title):
+            msg = f"标题《{title[:40]}》已在 CSDN 推送过（其他任务），跳过"
+            logger.info("任务(%s)[%s] %s", task.id, mp_name, msg)
+            # 同时将该文章 ID 记入本任务已推送列表，避免下次重复检查
+            if article_id_str and article_id_str not in csdn_published_ids:
+                new_ids = list(csdn_published_ids) + [article_id_str]
+                from core.models.message_task import MessageTask as MessageTaskModel
+                session.query(MessageTaskModel).filter(
+                    MessageTaskModel.id == str(task.id or ""),
+                    MessageTaskModel.owner_id == owner_id,
+                ).update(
+                    {MessageTaskModel.csdn_published_ids: _json.dumps(new_ids, ensure_ascii=False)},
+                    synchronize_session=False,
+                )
+                session.commit()
+            return msg
+
         # ── 3. AI 创作（配图 2 张，基于即梦生成）──
         from core.models.user import User as DBUser
         from core.ai_service import (
@@ -694,7 +790,7 @@ def _run_csdn_publish_sync(task: MessageTask, mps: list[Feed]) -> str:
         # ── 9. 记录推送结果（无论成功与否都记录文章ID，避免无限重试）──
         # 注意：只有认证失败(needs_reauth)时不记录，其他情况都记录以便跳过
         should_record = success or not needs_reauth
-        
+
         if should_record and article_id_str:
             new_ids = list(csdn_published_ids)
             if article_id_str not in new_ids:
@@ -707,6 +803,17 @@ def _run_csdn_publish_sync(task: MessageTask, mps: list[Feed]) -> str:
                     synchronize_session=False,
                 )
                 logger.info("任务(%s)[%s] 已记录文章到 csdn_published_ids: %s", task.id, mp_name, article_id_str)
+
+        # ── 跨任务标题去重记录：不论成功与否，写入全局推送记录避免其他任务重复推送 ──
+        if should_record and title:
+            try:
+                _record_title_published(
+                    session, owner_id, "csdn", title,
+                    article_id=article_id_str, task_id=str(task.id or ""),
+                )
+                logger.info("任务(%s)[%s] 跨任务标题去重已记录: %r", task.id, mp_name, title[:50])
+            except Exception as _e:
+                logger.warning("任务(%s)[%s] 记录跨任务标题去重失败: %s", task.id, mp_name, _e)
 
         if success:
             msg = f"CSDN 推送成功：《{title[:40]}》  {push_msg}"

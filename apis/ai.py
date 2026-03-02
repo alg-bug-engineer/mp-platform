@@ -34,6 +34,9 @@ from core.ai_service import (
     process_pending_publish_tasks,
     process_publish_task,
     summarize_activity_metrics,
+    get_platform_prompts_overview,
+    save_user_prompt_override,
+    delete_user_prompt_override,
     PUBLISH_STATUS_PENDING,
     PUBLISH_STATUS_FAILED,
 )
@@ -293,6 +296,18 @@ class InlineIllustrationRequest(BaseModel):
     style: str = Field(default="专业深度", max_length=64)
 
 
+class PromptTemplateUpdateRequest(BaseModel):
+    system_prompt: str = Field(default="", max_length=8000)
+    user_prompt: str = Field(default="", max_length=20000)
+
+
+class ManualDraftCreateRequest(BaseModel):
+    title: str = Field(default="", max_length=200)
+    content: str = Field(default="", max_length=100000)
+    platform: str = Field(default="wechat", max_length=32)
+    article_id: str = Field(default="", max_length=128)
+
+
 @router.get("/profile", summary="获取AI配置（平台统一）")
 async def get_profile(current_user: dict = Depends(get_current_user)):
     return success_response(get_platform_profile(mask_secret=True))
@@ -307,6 +322,36 @@ async def put_profile(payload: dict, current_user: dict = Depends(get_current_us
 async def compose_options(current_user: dict = Depends(get_current_user)):
     # 使用新的场景化描述
     return success_response(get_frontend_options())
+
+
+@router.get("/prompt-templates", summary="获取平台提示词模板")
+async def get_prompt_templates(current_user: dict = Depends(get_current_user)):
+    owner_id = _owner(current_user)
+    return success_response(get_platform_prompts_overview(owner_id))
+
+
+@router.put("/prompt-templates/{platform}", summary="更新平台自定义提示词")
+async def update_prompt_template(
+    platform: str,
+    payload: PromptTemplateUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    owner_id = _owner(current_user)
+    system_prompt = str(payload.system_prompt or "").strip()
+    user_prompt = str(payload.user_prompt or "").strip()
+    save_user_prompt_override(owner_id, platform, system_prompt=system_prompt, user_framework=user_prompt)
+    return success_response({"platform": platform, "saved": True}, message="提示词已保存")
+
+
+@router.delete("/prompt-templates/{platform}", summary="重置平台提示词为默认值")
+async def reset_prompt_template(
+    platform: str,
+    field: str = Query(default="", description="指定重置字段: system / user_framework，空则全部重置"),
+    current_user: dict = Depends(get_current_user),
+):
+    owner_id = _owner(current_user)
+    delete_user_prompt_override(owner_id, platform, field=field)
+    return success_response({"platform": platform, "reset": True}, message="提示词已重置为默认值")
 
 
 @router.get("/plans", summary="获取套餐目录")
@@ -406,6 +451,30 @@ async def workbench_overview(current_user: dict = Depends(get_current_user)):
         },
         "recent_drafts": all_drafts[:5],
     })
+
+
+@router.post("/drafts", summary="手动创建草稿")
+async def create_manual_draft(
+    payload: ManualDraftCreateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    owner_id = _owner(current_user)
+    title = str(payload.title or "").strip()
+    content = str(payload.content or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="草稿标题不能为空")
+    if not content:
+        raise HTTPException(status_code=400, detail="草稿内容不能为空")
+    article_id = str(payload.article_id or "").strip() or "manual"
+    record = save_local_draft(
+        owner_id=owner_id,
+        article_id=article_id,
+        title=title,
+        content=content,
+        platform=str(payload.platform or "wechat").strip().lower(),
+        mode="manual",
+    )
+    return success_response(record, message="草稿已创建")
 
 
 @router.get("/drafts", summary="获取草稿历史")

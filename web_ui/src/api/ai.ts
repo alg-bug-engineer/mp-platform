@@ -400,3 +400,45 @@ export const retryPublishTask = (taskId: string) => {
 export const deletePublishTask = (taskId: string) => {
   return http.delete<{ id: string; deleted: boolean }>(`/wx/ai/publish/tasks/${taskId}`)
 }
+
+export interface PromptTemplateRecord {
+  platform: string
+  label: string
+  default_system: string
+  custom_system: string
+  has_system_override: boolean
+  default_user_framework: string
+  custom_user_framework: string
+  has_framework_override: boolean
+  constraints: string[]
+  platform_style: string
+}
+
+export const getPromptTemplates = () => {
+  return http.get<PromptTemplateRecord[]>('/wx/ai/prompt-templates')
+}
+
+export const updatePromptTemplate = (platform: string, systemPrompt: string, userPrompt: string = '') => {
+  return http.put<{ platform: string; saved: boolean }>(`/wx/ai/prompt-templates/${platform}`, {
+    system_prompt: systemPrompt,
+    user_prompt: userPrompt,
+  })
+}
+
+export const resetPromptTemplate = (platform: string, field: string = '') => {
+  const url = field
+    ? `/wx/ai/prompt-templates/${platform}?field=${encodeURIComponent(field)}`
+    : `/wx/ai/prompt-templates/${platform}`
+  return http.delete<{ platform: string; reset: boolean }>(url)
+}
+
+export interface ManualDraftPayload {
+  title: string
+  content: string
+  platform?: string
+  article_id?: string
+}
+
+export const createManualDraft = (payload: ManualDraftPayload) => {
+  return http.post<DraftRecord>('/wx/ai/drafts', payload)
+}

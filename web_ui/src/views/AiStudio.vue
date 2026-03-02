@@ -25,6 +25,8 @@
         >
           {{ item.label }}
         </a-button>
+        <a-divider direction="vertical" style="margin: 0 2px;" />
+        <a-button size="small" type="outline" @click="openPromptSettings">提示词设置</a-button>
       </a-space>
     </section>
 
@@ -226,6 +228,7 @@
 
         <a-card v-if="activeSection === 'drafts'" id="studio-drafts-card" title="草稿历史（本地草稿箱）" class="panel" :loading="draftLoading">
           <a-space style="margin-bottom: 10px;" wrap>
+            <a-button type="primary" size="small" @click="openWriteDraft">写草稿</a-button>
             <a-checkbox
               :model-value="allDraftSelected"
               :indeterminate="selectedDraftCount > 0 && !allDraftSelected"
@@ -555,6 +558,136 @@
       </a-form>
     </a-modal>
 
+    <!-- 写草稿 Modal -->
+    <a-modal v-model:visible="writeDraftVisible" title="写草稿" width="860px" :on-before-ok="submitWriteDraft">
+      <a-form :model="writeDraftForm" layout="vertical">
+        <a-row :gutter="16">
+          <a-col :span="16">
+            <a-form-item label="草稿标题">
+              <a-input v-model="writeDraftForm.title" placeholder="请输入草稿标题" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="发布平台">
+              <a-select v-model="writeDraftForm.platform">
+                <a-option v-for="p in composePlatforms" :key="p.key" :value="p.key">{{ p.label }}</a-option>
+                <a-option value="csdn">CSDN</a-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="草稿内容（支持 Markdown）">
+          <a-textarea
+            v-model="writeDraftForm.content"
+            placeholder="粘贴 Markdown 内容，保存后可使用划线生图、编辑、推送等功能"
+            :auto-size="{ minRows: 16, maxRows: 28 }"
+          />
+        </a-form-item>
+        <div class="muted" style="font-size: 12px;">
+          保存后与 AI 生成的草稿功能一致：支持划线生图、编辑修改、同步到公众号等。
+        </div>
+      </a-form>
+    </a-modal>
+
+    <!-- 提示词设置 Modal -->
+    <a-modal v-model:visible="promptSettingsVisible" title="平台提示词设置" width="960px" :footer="false">
+      <div v-if="promptLoading" style="text-align: center; padding: 40px;">
+        <a-spin />
+      </div>
+      <template v-else>
+        <a-alert type="info" style="margin-bottom: 16px;">
+          自定义提示词将覆盖平台默认设定。<strong>系统提示词</strong>定义 AI 角色与风格；<strong>用户提示词模板</strong>定义输出结构与约束。留空则使用默认值。
+        </a-alert>
+        <a-tabs v-model:active-key="promptActiveTab">
+          <a-tab-pane v-for="tpl in promptTemplates" :key="tpl.platform" :title="tpl.label">
+            <a-space direction="vertical" style="width: 100%;" size="medium">
+              <!-- 平台信息 -->
+              <div v-if="tpl.platform_style || tpl.constraints.length">
+                <div v-if="tpl.platform_style" class="muted" style="margin-bottom: 6px; font-size: 12px;">
+                  平台风格：{{ tpl.platform_style }}
+                </div>
+                <div v-if="tpl.constraints.length">
+                  <div class="muted" style="font-size: 12px; margin-bottom: 4px;">平台约束（系统内置）：</div>
+                  <a-space wrap size="mini">
+                    <a-tag v-for="(c, i) in tpl.constraints" :key="i" color="arcoblue" size="small">{{ c }}</a-tag>
+                  </a-space>
+                </div>
+              </div>
+
+              <!-- 系统提示词 -->
+              <div>
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                  <span style="font-size: 13px; font-weight: 500;">
+                    系统提示词（System Prompt）
+                    <a-tag v-if="tpl.has_system_override" color="green" size="small" style="margin-left: 6px;">已自定义</a-tag>
+                    <a-tag v-else color="gray" size="small" style="margin-left: 6px;">使用默认</a-tag>
+                  </span>
+                  <a-space size="mini">
+                    <a-button size="mini" @click="fillDefaultSystemPrompt(tpl.platform)">查看/填入默认</a-button>
+                    <a-button
+                      v-if="tpl.has_system_override"
+                      size="mini"
+                      status="danger"
+                      :loading="promptResetting === tpl.platform + ':system'"
+                      @click="resetPlatformPrompt(tpl.platform, 'system')"
+                    >
+                      重置
+                    </a-button>
+                  </a-space>
+                </div>
+                <a-textarea
+                  :model-value="promptEditValues[tpl.platform]?.system ?? (tpl.custom_system || '')"
+                  @update:model-value="(v: string) => { if (!promptEditValues[tpl.platform]) promptEditValues[tpl.platform] = { system: '', framework: '' }; promptEditValues[tpl.platform].system = v }"
+                  :placeholder="'留空使用默认系统提示词（点击「查看/填入默认」可查看完整默认内容）'"
+                  :auto-size="{ minRows: 6, maxRows: 14 }"
+                />
+              </div>
+
+              <!-- 用户提示词模板 -->
+              <div>
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                  <span style="font-size: 13px; font-weight: 500;">
+                    用户提示词模板（User Prompt Framework）
+                    <a-tag v-if="tpl.has_framework_override" color="green" size="small" style="margin-left: 6px;">已自定义</a-tag>
+                    <a-tag v-else color="gray" size="small" style="margin-left: 6px;">使用默认</a-tag>
+                  </span>
+                  <a-space size="mini">
+                    <a-button size="mini" @click="fillDefaultFramework(tpl.platform)">查看/填入默认</a-button>
+                    <a-button
+                      v-if="tpl.has_framework_override"
+                      size="mini"
+                      status="danger"
+                      :loading="promptResetting === tpl.platform + ':user_framework'"
+                      @click="resetPlatformPrompt(tpl.platform, 'user_framework')"
+                    >
+                      重置
+                    </a-button>
+                  </a-space>
+                </div>
+                <a-textarea
+                  :model-value="promptEditValues[tpl.platform]?.framework ?? (tpl.custom_user_framework || '')"
+                  @update:model-value="(v: string) => { if (!promptEditValues[tpl.platform]) promptEditValues[tpl.platform] = { system: '', framework: '' }; promptEditValues[tpl.platform].framework = v }"
+                  :placeholder="'留空使用默认用户提示词模板（点击「查看/填入默认」可查看完整默认内容）'"
+                  :auto-size="{ minRows: 6, maxRows: 14 }"
+                />
+              </div>
+
+              <!-- 保存按钮 -->
+              <div style="text-align: right; padding-bottom: 4px;">
+                <a-button
+                  type="primary"
+                  :loading="promptSaving === tpl.platform"
+                  @click="savePlatformPrompt(tpl.platform)"
+                >
+                  保存此平台的提示词
+                </a-button>
+              </div>
+            </a-space>
+          </a-tab-pane>
+        </a-tabs>
+      </template>
+    </a-modal>
+
     <a-modal
       v-model:visible="whitelistReminderVisible"
       title="公众号同步白名单提示"
@@ -609,10 +742,15 @@ import {
   processPublishTasks,
   retryPublishTask,
   deletePublishTask,
+  getPromptTemplates,
+  updatePromptTemplate,
+  resetPromptTemplate,
+  createManualDraft,
   type AIComposeResult,
   type ComposeTask,
   type DraftRecord,
   type PublishTask,
+  type PromptTemplateRecord,
 } from '@/api/ai'
 import { getArticles } from '@/api/article'
 import { getSubscriptions } from '@/api/subscription'
@@ -694,6 +832,20 @@ const createVisible = ref(false)
 const draftDetailVisible = ref(false)
 const draftSyncVisible = ref(false)
 const whitelistReminderVisible = ref(false)
+const writeDraftVisible = ref(false)
+const writeDraftLoading = ref(false)
+const writeDraftForm = reactive({
+  title: '',
+  content: '',
+  platform: 'wechat',
+})
+const promptSettingsVisible = ref(false)
+const promptLoading = ref(false)
+const promptSaving = ref('')
+const promptResetting = ref('')
+const promptActiveTab = ref('wechat')
+const promptTemplates = ref<PromptTemplateRecord[]>([])
+const promptEditValues = reactive<Record<string, { system: string; framework: string }>>({})
 const whitelistReminderSessionClosed = ref(false)
 const whitelistReminderNever = ref(localStorage.getItem(WECHAT_WHITELIST_REMINDER_NEVER_KEY) === '1')
 const currentCreateArticle = ref<any>(null)
@@ -915,11 +1067,13 @@ const deliveryExtraPreview = (item: DraftDeliveryHistoryItem) => {
 const draftModeLabel = (mode: string) => {
   if (mode === 'analyze') return '分析'
   if (mode === 'rewrite') return '仿写'
+  if (mode === 'manual') return '手写'
   return '创作'
 }
 const draftModeColor = (mode: string) => {
   if (mode === 'analyze') return 'orange'
   if (mode === 'rewrite') return 'purple'
+  if (mode === 'manual') return 'green'
   return 'arcoblue'
 }
 const draftWechatStatusLabel = (draft: DraftRecord) => {
@@ -1433,6 +1587,121 @@ const openDraftDetail = (draft: DraftRecord, syncQuery: boolean = true) => {
     },
     'push'
   )
+}
+
+// ===== Write Draft (手写草稿) =====
+const openWriteDraft = () => {
+  writeDraftForm.title = ''
+  writeDraftForm.content = ''
+  writeDraftForm.platform = createForm.platform || 'wechat'
+  writeDraftVisible.value = true
+}
+const submitWriteDraft = async () => {
+  const title = writeDraftForm.title.trim()
+  const content = writeDraftForm.content.trim()
+  if (!title) {
+    Message.error('请填写草稿标题')
+    return false
+  }
+  if (!content) {
+    Message.error('请填写草稿内容')
+    return false
+  }
+  writeDraftLoading.value = true
+  try {
+    await createManualDraft({
+      title,
+      content,
+      platform: writeDraftForm.platform,
+    })
+    Message.success('草稿已保存')
+    writeDraftVisible.value = false
+    await fetchDrafts()
+    return true
+  } catch (e: any) {
+    Message.error(e?.message || '保存失败，请重试')
+    return false
+  } finally {
+    writeDraftLoading.value = false
+  }
+}
+
+// ===== Prompt Settings (提示词设置) =====
+const openPromptSettings = async () => {
+  promptSettingsVisible.value = true
+  if (promptTemplates.value.length) return
+  promptLoading.value = true
+  try {
+    const list = await getPromptTemplates()
+    promptTemplates.value = (list as any) || []
+    for (const tpl of promptTemplates.value) {
+      if (!(tpl.platform in promptEditValues)) {
+        promptEditValues[tpl.platform] = {
+          system: tpl.custom_system || '',
+          framework: tpl.custom_user_framework || '',
+        }
+      }
+    }
+  } catch (e) {
+    Message.error('获取提示词设置失败')
+  } finally {
+    promptLoading.value = false
+  }
+}
+const fillDefaultSystemPrompt = (platform: string) => {
+  const tpl = promptTemplates.value.find((t) => t.platform === platform)
+  if (!tpl) return
+  if (!promptEditValues[platform]) promptEditValues[platform] = { system: '', framework: '' }
+  promptEditValues[platform].system = tpl.default_system
+}
+const fillDefaultFramework = (platform: string) => {
+  const tpl = promptTemplates.value.find((t) => t.platform === platform)
+  if (!tpl) return
+  if (!promptEditValues[platform]) promptEditValues[platform] = { system: '', framework: '' }
+  promptEditValues[platform].framework = tpl.default_user_framework
+}
+const savePlatformPrompt = async (platform: string) => {
+  const vals = promptEditValues[platform] || { system: '', framework: '' }
+  promptSaving.value = platform
+  try {
+    await updatePromptTemplate(platform, vals.system.trim(), vals.framework.trim())
+    Message.success('提示词已保存')
+    const tpl = promptTemplates.value.find((t) => t.platform === platform)
+    if (tpl) {
+      tpl.custom_system = vals.system.trim()
+      tpl.custom_user_framework = vals.framework.trim()
+      tpl.has_system_override = !!vals.system.trim()
+      tpl.has_framework_override = !!vals.framework.trim()
+    }
+  } catch (e: any) {
+    Message.error(e?.message || '保存失败')
+  } finally {
+    promptSaving.value = ''
+  }
+}
+const resetPlatformPrompt = async (platform: string, field: string = '') => {
+  promptResetting.value = platform + (field ? ':' + field : '')
+  try {
+    await resetPromptTemplate(platform, field)
+    Message.success('已重置为默认')
+    const tpl = promptTemplates.value.find((t) => t.platform === platform)
+    if (tpl) {
+      if (!field || field === 'system') {
+        tpl.custom_system = ''
+        tpl.has_system_override = false
+        if (promptEditValues[platform]) promptEditValues[platform].system = ''
+      }
+      if (!field || field === 'user_framework') {
+        tpl.custom_user_framework = ''
+        tpl.has_framework_override = false
+        if (promptEditValues[platform]) promptEditValues[platform].framework = ''
+      }
+    }
+  } catch (e: any) {
+    Message.error(e?.message || '重置失败')
+  } finally {
+    promptResetting.value = ''
+  }
 }
 
 const toggleDraftEdit = () => {

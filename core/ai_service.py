@@ -55,6 +55,27 @@ DEFAULT_LOCAL_RULES = {
                 "段落长度错落，避免机械重复句式",
                 "正文以段落推进为主，小标题与编号仅在必要时少量使用",
             ],
+            "system_prompt": """[C - Context]
+你是一位专为微信公众号创作深度内容的资深专栏作家与内容策略师。微信公众号的核心竞争力是"深度原创"——读者会因为一篇文章订阅，也会因为一篇模板化的AI生成物取关。
+
+[O - Objective]
+从素材中提炼出真正有价值的洞察，重新构建叙事角度，创作出一篇让读者愿意收藏、转发、评论"说到点子上了"的深度专栏文章。不是摘要，不是复述，是基于素材的二次创作与深度演绎。
+
+[S - Style]
+散文专栏风格：段落连贯流畅，信息密度高。拒绝用无序列表堆砌观点，用逻辑推演和场景描写推进文章。全文控制在 2 个二级标题以内，其余以自然段落过渡承接。善用**加粗**强调关键结论，而非装饰用途。开篇策略：反直觉现象、行业痛点或生动场景，而非"随着XX发展"式铺垫。
+
+[T - Tone]
+专业但有温度，有鲜明观点但不偏激。像一位你信赖的行业前辈在私下分享真实思考——既不是在讲台上背PPT，也不是在朋友圈发心灵鸡汤。每一段都让读者感受到"这个人是认真想过的"。
+
+[A - Audience]
+具备一定行业背景的知识工作者、创业者、技术从业者。他们阅读大量内容，对"首先其次最后"的AI模板腔零容忍，只会停下来读"真正说出了我没想到但又深以为然"的内容。
+
+[R - Response Format]
+- 直接输出文章正文，以 `# [重新构思的新标题]` 开头，**禁止照搬原素材标题**
+- 全文 1500-2000 字，最多使用 2 个二级标题（`##`）
+- 严禁：首先/其次/最后/总之/值得注意的是/随着XX的发展 等模板词
+- 严禁：`[配图建议]`、`[插入图片]`、`[图片占位符]` 等任何占位文字
+- 结尾必须有升华：给读者一个带走的洞察或明确的行动方向""",
         },
         "xiaohongshu": {
             "label": "小红书",
@@ -85,6 +106,32 @@ DEFAULT_LOCAL_RULES = {
                 "需要配图时，使用 Markdown 图片格式 ![描述](图片URL) 插入",
                 "避免空话套话，优先给可验证的技术结论",
             ],
+            "system_prompt": """[C - Context]
+你是一位专为 CSDN 技术社区创作内容的资深工程师与技术博主。CSDN 读者是开发者群体，他们来这里是为了解决实际问题、理解新技术原理、了解行业技术动态。他们对技术准确性要求高，对废话引言和技术营销语气极度排斥。
+
+[O - Objective]
+基于素材中的技术信息，创作一篇技术准确、有实践价值、逻辑清晰的技术文章。文章核心任务：帮助读者真正理解技术要点，而非罗列信息摘要。重点在于"为什么重要"和"怎么实际用"，而非"是什么"的百科式描述。
+
+[S - Style]
+技术深度博客风格：
+- 结构清晰：合理使用标题分层（H2/H3），复杂概念配合代码块（注明语言）或对比表格
+- 深度优先：解释"是什么"的同时，必须解释"为什么这样设计"和"实际用时要注意什么"
+- 案例驱动：用具体的技术场景、代码片段或真实性能数据说明观点，不做空洞类比
+- 横向对比：与同类技术/方案做对比，帮助读者做技术选型判断，指出各自适用边界
+
+[T - Tone]
+务实专业的工程师视角。像一位有丰富实战经验的技术专家在分享真实踩坑心得——客观准确，不夸大技术价值，不做技术营销，允许有明确技术立场，观点需有依据支撑。
+
+[A - Audience]
+中高级开发者、技术架构师、对 AI/新技术感兴趣的工程师。他们能在3秒内判断内容是否有干货，只读"真正有实践经验才能写出来"的内容，对"本文将为您详细介绍XXX技术的方方面面"类废话引言直接划走。
+
+[R - Response Format]
+- 直接输出 Markdown 格式文章，以 `# [技术感强、点明核心价值的标题]` 开头
+- 结构参考：核心概述 → 原理/特性深度分析 → 实践要点与代码示例 → 适用场景与局限性 → 总结
+- 代码块使用 ``` 并标注语言类型（如 ```python）
+- 严禁：`[配图建议]`、`[插入图片]` 等任何占位符
+- 严禁：无依据的技术预言、技术营销语气、"随着AI的发展"类套话开头
+- 技术数据/性能指标需说明来源或测试条件，不做凭空断言""",
         },
         "twitter": {
             "label": "推特/X",
@@ -389,12 +436,166 @@ def _length_instruction(length: str) -> str:
     return length_map.get(text, text)
 
 
+PLATFORM_CREATE_FRAMEWORKS = {
+    "wechat": """# 创作任务：微信公众号深度专栏
+
+## 核心要求
+重新构思标题，拒绝照搬原文标题。标题须有**高点击欲、专业感且不浮夸**，以 `# ` 一级标题输出。
+
+## 行文原则
+- **散文专栏风格**：段落连贯流畅，拒绝用无序列表堆砌观点，用逻辑推演和场景描写推进。
+- **慎用小标题**：全文最多 2 个二级标题（`##`），其余以自然段落过渡承接。
+- **拒绝 AI 腔**：禁用"首先/其次/最后/总之/值得注意的是"等模板词；改用逻辑承接（"这背后的本质是…"、"但问题在于…"）。
+- **善用加粗**：通过 `**加粗**` 强调核心结论，引导阅读节奏，代替列表。
+- **开篇策略**：反直觉现象、行业痛点或生动场景，杜绝"随着 XX 的发展"式铺垫。
+
+## 内容深度
+篇幅 1500-2000 字以上。不做摘要，必须加入历史背景、横向对比、技术优劣分析、未来趋势。正反两面思辨，体现"认知驱动"。
+
+## 行文结构（无缝融入正文，不要输出标号）
+1. **破题**：用反直觉现象或切肤痛点引入，抛出核心矛盾
+2. **本质剖析**：为什么重要？解决了什么根本问题？（可用类比）
+3. **多维思辨**：局限性、成本、不同路线的对立统一
+4. **升华收尾**：给读者一个带走的洞察或明确行动方向
+
+## 禁止事项
+- 严禁 `[配图建议]`、`[插入图片]` 等任何占位符
+- 严禁照搬原文标题""",
+
+    "xiaohongshu": """# 创作任务：小红书笔记
+
+## 核心定位
+像闺蜜/朋友分享一个真实发现——真诚、接地气、有画面感，让人看了想转发或收藏。
+
+## 标题写法
+起一个小红书风格标题：口语化、有悬念或对比感，不超过 20 字。例如："AI写作工具测评！踩了 5 个坑才找到这个宝藏✨"
+
+## 正文结构
+1. **开篇 hook（前3行决定生死）**：直接抛痛点、反常识结论或强烈共鸣句，让人不得不滑下去
+2. **核心内容**：干货或故事，分成 3-5 个短段，每段 2-4 行，用换行制造节奏
+3. **结尾互动**：抛一个问题或引导收藏（"你们有没有遇到过…"、"建议先收藏，用到的时候找得到"）
+
+## 排版规则
+- 段落短：每段不超过 4 行，多用换行
+- 表情符号：适度使用 ✨💡🔥💪 等，增加亲和力，不要滥用
+- 列表 OK：小红书适合用"❶❷❸"或"→"做简短要点列举
+- 字数：正文 300-600 字为宜
+
+## 语言风格
+- 口语化：多用"我发现"、"真的"、"姐妹们"、"好用到哭"等真实表达
+- 场景化：说具体场景，不说抽象概念（不说"效率提升"，说"以前要3小时，现在20分钟搞定"）
+- 第一人称：大量使用"我"，增加真实感
+
+## 禁止事项
+- 严禁正式文章腔调（不要"本文将"、"综上所述"）
+- 严禁 `[配图建议]` 等任何占位符
+- 不写超过 4 行的大段文字""",
+
+    "zhihu": """# 创作任务：知乎回答/文章
+
+## 核心定位
+像一个有真实经验的行业从业者在认真回答问题——有理有据、深入浅出，让读者看完觉得"涨知识了"。
+
+## 开篇策略
+直接亮明核心观点或结论（知乎读者没耐心看铺垫），然后用数据、案例、逻辑逐步展开。
+
+## 内容结构
+1. **核心观点**：开门见山，一句话点题
+2. **论据展开**：数据支撑 + 具体案例 + 逻辑推演（三者至少用两个）
+3. **深度延伸**：讨论边界条件、反例、与其他观点的对比
+4. **实践建议**：给出可操作的结论，而非停在理论层
+
+## 排版规则
+- 合理使用 H2/H3 标题分层，提升可读性
+- 适量使用有序/无序列表（与公众号不同，知乎用列表很自然）
+- 字数：800-1500 字，不贪多，每句话要有信息量
+- 引用数据时注明来源或说明是估算
+
+## 语言风格
+- 专业但不炫技：深入浅出，术语配解释
+- 有个人立场：可以说"我认为"、"我的经验是"，避免两边倒的"都有道理"
+- 批判性思维：主动提出"但这个方法也有局限"、"很多人误解的是"
+
+## 禁止事项
+- 严禁只堆概念不给案例（"技术很重要"这种废话不要有）
+- 严禁 `[配图建议]` 等任何占位符
+- 不做无立场的"总结大全"式罗列""",
+
+    "twitter": """# 创作任务：推特/X 帖子
+
+## 核心定位
+提炼一个值得传播的洞察或观点，让人看到第一句话就想点开、看完想转发。
+
+## 格式选择（二选一）
+
+**单条推文**（适合单一强观点）：
+- 280字符以内（中文约90字）
+- 第一句即核心，后面补充或反转
+- 可用1-2个相关 hashtag 结尾
+
+**线程（Thread）**（适合需要展开的主题）：
+- 第一条：最强的 hook，抛出惊人结论或反常识观点
+- 中间 3-5 条：每条一个支撑点，每条独立可读
+- 最后一条：行动号召或开放式问题
+- 格式：每条开头加 `1/` `2/` ... 序号
+
+## 内容原则
+- **第一句决定一切**：必须让人停止滑动（数字对比、反直觉、强观点均可）
+- **一条一个点**：不要把三个观点塞进一条，宁可做 Thread
+- **口语化**：写说话的语气，不写书面语
+- **有立场**：直接表达观点，不和稀泥
+
+## 禁止事项
+- 严禁超出字数限制（单条中文不超过 90 字）
+- 严禁堆砌 hashtag（最多 2 个）
+- 严禁 `[配图建议]` 等任何占位符
+- 不写没有观点的事件摘要""",
+
+    "csdn": """# 创作任务：CSDN 技术博客
+
+## 核心定位
+帮助开发者解决实际问题或理解技术原理——技术准确、有实践价值、代码可运行。
+
+## 标题写法
+技术感强、点明核心价值，例如："深入理解 RAG：从原理到生产环境的 5 个关键优化"
+
+## 文章结构
+1. **摘要/TL;DR**（可选）：3 句话说清楚这篇文章讲什么、适合谁、能学到什么
+2. **背景与问题**：为什么这个技术/方案值得关注？解决了什么痛点？
+3. **核心原理**：深入解释"为什么这样设计"，不只说"是什么"
+4. **代码示例**：用 ` ``` ` 代码块（注明语言），示例必须是可运行的真实代码
+5. **实践要点**：踩坑记录、性能数据、适用边界、与其他方案的对比
+6. **总结**：关键结论 + 适用场景 + 局限性
+
+## 排版规则
+- 使用 H2（`##`）和 H3（`###`）分层，结构清晰
+- 代码块标注语言类型（` ```python `、` ```bash ` 等）
+- 性能数据/对比结果用表格呈现
+- 字数：1000-2000 字，技术密度优先于篇幅
+
+## 语言风格
+- 工程师视角：务实、准确、不夸大
+- 数据说话：性能数字需说明测试条件
+- 横向对比：与同类方案比较，给出选型建议
+
+## 禁止事项
+- 严禁 `[配图建议]`、`[插入图片]` 等任何占位符
+- 严禁凭空断言技术性能（需有测试依据）
+- 严禁"本文将为您详细介绍"类废话开头
+- 代码示例不能是伪代码或不可运行的片段""",
+}
+
+# 兜底框架（新平台或未知平台使用）
+_DEFAULT_FALLBACK_FRAMEWORK = PLATFORM_CREATE_FRAMEWORKS["wechat"]
+
+
 def build_prompt(
     mode: str,
     title: str,
     content: str,
     instruction: str = "",
     create_options: Dict = None,
+    owner_id: str = None,
 ) -> Tuple[str, str]:
     rules = load_local_rules()
     platform_map = rules.get("platform_templates", {})
@@ -426,7 +627,7 @@ def build_prompt(
         "1. 正文以自然段叙述为主，不要堆砌小标题。\n"
         "2. 全文最多使用 2 个二级标题，禁止三级及以下标题。\n"
         "3. 非必要不使用有序列表；若必须列步骤，仅允许 1 处且最多 3 条。\n"
-        "4. 避免“首先/其次/最后/总之”等模板词，降低 AI 腔。\n"
+        '4. 避免"首先/其次/最后/总之"等模板词，降低 AI 腔。\n'
         "5. 每段必须有新信息，多写具体场景、动作细节、数字或对比。\n"
         "6. 句式长短交替，避免整篇同一节奏。\n"
     )
@@ -526,48 +727,21 @@ def build_prompt(
 
     # create
     platform_constraints = "\n".join([f"- {x}" for x in platform_cfg.get("constraints", [])])
-    system = "你是资深AI与科技领域的深度观察者与专栏作家。"
-    create_framework = """# Role: 资深AI/科技领域深度观察者与专栏作家
-
-## Profile
-你是一位类似于“量子位”、“新智元”、“Datawhale”等顶尖AI技术社区特邀作家的资深专栏作者。你擅长将前沿的AI技术、热点事件或学术论文转化为一篇极具洞察力、逻辑严密、兼具专业深度与阅读愉悦感的深度长文。你拒绝使用枯燥的列表、机械的短句，而是使用连贯的段落、精妙的比喻和引人深思的推演。
-
-你的行文对标高质量公众号深度推文，特点是：**高语境、重逻辑、少而精的小标题、大量自然段落过渡、用加粗强调核心观点、结尾有全局视角的升华**。
-
-## Core Philosophy (核心创作心法)
-
-### 1. 拒绝照搬，重塑标题（核心）
-绝对不要直接使用原素材标题。你需要根据文章的核心洞察，重新构思一个具有**高点击欲、专业感且不浮夸**的新标题。标题应直接作为 `# ` 一级标题输出。
-
-### 2. 拒绝AI味（排版与句式原则）
-- **禁止使用大量列表和短句**。文章必须以流畅的散文/专栏形式呈现，使用长短错落的句式。
-- **禁止生硬的过渡词**（如“首先、其次、最后”、“总之”）。使用逻辑推演来自然过渡（如“这背后的本质是…”、“但这种设计的代价也是明显的…”）。
-- **慎用小标题**。全文尽量控制在2-3个二级标题内，用自然的段落承接。
-- **划重点**。通过**加粗**核心关键词或关键结论，来引导读者阅读节奏，代替列表结构。
-
-### 3. 思想深度与字数（内容原则）
-- 这是一篇深度推文，篇幅应充实（预期1500-2000字以上）。不要做简单的内容摘要，必须加入你作为行业专家的“隐性知识”：历史背景、横向对比、技术优劣势分析、未来趋势预测。
-- 采用对比论证、正反两面思考，展现“认知驱动”而非流水线生成。
-
-### 4. 纯净的正文（严禁配图提示）
-- **严禁在正文中出现任何诸如 `[配图建议：类型-内容-情绪]`、`[建议配图...]`、`[插入图片]` 的占位符和提示文字。**
-- 让你的文字本身充满画面感即可，排版配图会由其他系统自动完成，不要你在正文中输出任何图片提示。
-
-## Essay Structure (专栏行文结构)
-
-不要输出“1. xx 2. xx”，请将以下结构无缝融入文章的自然段落：
-
-1. **破题与引言**：用一个反直觉的现象、一个宏大的行业背景或一个切肤的痛点引入主题。抛出核心矛盾或核心突破点。
-2. **本质剖析**：不要罗列参数或表面新闻，深入解释这项技术/事件“为什么重要”？它解决的本质问题是什么？（可使用生动的类比，例如将AI系统比作“精密流水线”与“人类专家”的差异）。
-3. **多维博弈/优劣思辨**：探讨该技术/思路的局限性、成本、或者不同路线之间的对立统一。
-4. **融合与升华**：跳出事件本身，给出“所以呢？”的答案。它将如何影响行业格局？未来的演进方向在哪里？
-
-## Output Format (输出格式要求)
-
-- 直接输出文章正文，以 `# [你构思的全新精彩标题]` 开头。
-- 不要输出任何你的思考过程、诊断步骤或前言后语。
-- 正文中绝对不要出现 `[配图建议]` 或任何括号内的占位符。
-- 确保全文是一篇连贯、高质量、排版优雅（善用加粗和引用）的微信公众号深度专栏文章。"""
+    # 优先级：用户自定义 > 平台专属 system_prompt > 通用默认
+    system = (
+        platform_cfg.get("system_prompt")
+        or "你是资深AI与科技领域的深度观察者与专栏作家。"
+    )
+    # 优先级：用户自定义 user_framework > 平台专属框架 > 兜底框架
+    create_framework = PLATFORM_CREATE_FRAMEWORKS.get(platform, _DEFAULT_FALLBACK_FRAMEWORK)
+    if owner_id:
+        user_overrides = get_user_prompt_overrides(owner_id)
+        platform_override = user_overrides.get(platform, {})
+        if platform_override.get("system"):
+            system = platform_override["system"]
+        if platform_override.get("user_framework"):
+            create_framework = platform_override["user_framework"]
+    platform_label = platform_cfg.get("label", platform)
     user = (
         create_framework
         + f"\n\n【原始素材主题】\n{title}\n\n"
@@ -1681,6 +1855,106 @@ def delete_local_drafts(owner_id: str, draft_ids: List[str]) -> int:
         return 0
     _write_draft_rows(owner_id, next_rows)
     return deleted
+
+
+def _prompt_override_dir() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "prompt_overrides")
+
+
+def _prompt_override_file(owner_id: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_\-.]", "_", str(owner_id or "anonymous"))
+    return os.path.join(_prompt_override_dir(), f"{safe}.json")
+
+
+def get_user_prompt_overrides(owner_id: str) -> Dict:
+    path = _prompt_override_file(owner_id)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.loads(f.read()) or {}
+    except Exception:
+        return {}
+
+
+def save_user_prompt_override(
+    owner_id: str,
+    platform: str,
+    system_prompt: str = "",
+    user_framework: str = "",
+) -> None:
+    os.makedirs(_prompt_override_dir(), exist_ok=True)
+    overrides = get_user_prompt_overrides(owner_id)
+    key = str(platform).strip()
+    entry = dict(overrides.get(key, {}))
+    if system_prompt.strip():
+        entry["system"] = system_prompt.strip()
+    else:
+        entry.pop("system", None)
+    if user_framework.strip():
+        entry["user_framework"] = user_framework.strip()
+    else:
+        entry.pop("user_framework", None)
+    if entry:
+        overrides[key] = entry
+    else:
+        overrides.pop(key, None)
+    with open(_prompt_override_file(owner_id), "w", encoding="utf-8") as f:
+        f.write(json.dumps(overrides, ensure_ascii=False, indent=2))
+
+
+def delete_user_prompt_override(owner_id: str, platform: str, field: str = "") -> None:
+    """field 为空时清除整个平台覆盖；field='system'/'user_framework' 时只清除该字段。"""
+    overrides = get_user_prompt_overrides(owner_id)
+    key = str(platform).strip()
+    if key not in overrides:
+        return
+    if field:
+        overrides[key].pop(str(field).strip(), None)
+        if not overrides[key]:
+            del overrides[key]
+    else:
+        del overrides[key]
+    os.makedirs(_prompt_override_dir(), exist_ok=True)
+    with open(_prompt_override_file(owner_id), "w", encoding="utf-8") as f:
+        f.write(json.dumps(overrides, ensure_ascii=False, indent=2))
+
+
+def get_platform_prompts_overview(owner_id: str) -> List[Dict]:
+    """Return prompt info for all platforms with default and user overrides."""
+    rules = load_local_rules()
+    platform_map = rules.get("platform_templates", {})
+    overrides = get_user_prompt_overrides(owner_id)
+    generic_system = "你是资深AI与科技领域的深度观察者与专栏作家。"
+    platforms = [
+        ("wechat", "微信公众号"),
+        ("xiaohongshu", "小红书"),
+        ("zhihu", "知乎"),
+        ("twitter", "推特/X"),
+        ("csdn", "CSDN"),
+    ]
+    result = []
+    for platform_key, platform_label in platforms:
+        platform_cfg = platform_map.get(platform_key, {})
+        override = overrides.get(platform_key, {})
+        default_system = platform_cfg.get("system_prompt") or generic_system
+        default_framework = PLATFORM_CREATE_FRAMEWORKS.get(platform_key, _DEFAULT_FALLBACK_FRAMEWORK)
+        result.append({
+            "platform": platform_key,
+            "label": platform_label,
+            # 系统提示词
+            "default_system": default_system,
+            "custom_system": override.get("system", ""),
+            "has_system_override": bool(override.get("system")),
+            # 用户提示词框架
+            "default_user_framework": default_framework,
+            "custom_user_framework": override.get("user_framework", ""),
+            "has_framework_override": bool(override.get("user_framework")),
+            # 其他信息
+            "constraints": platform_cfg.get("constraints", []),
+            "platform_style": platform_cfg.get("style", ""),
+        })
+    return result
 
 
 def mark_local_draft_delivery(

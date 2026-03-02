@@ -23,6 +23,7 @@ import logging
 import logging.handlers
 import sys
 import uuid
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Generator, Optional
@@ -171,6 +172,24 @@ def _setup_app_logging() -> None:
     # 其他常见库
     logging.getLogger("apscheduler").setLevel(logging.INFO)
     logging.getLogger("amqp").setLevel(logging.WARNING)
+
+    # ── 代理专用日志 ──
+    proxy_logger = logging.getLogger("proxy")
+    proxy_logger.propagate = False  # 不向上传播到 root logger，避免在控制台重复打印
+    proxy_logger.setLevel(logging.DEBUG)
+    
+    # 确保 logs 目录存在
+    os.makedirs("logs", exist_ok=True)
+    
+    pfh = logging.handlers.RotatingFileHandler(
+        "logs/proxy.log",
+        maxBytes=5 * 1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    pfh.setFormatter(logging.Formatter(_FMT, datefmt=_DATE_FMT))
+    pfh.addFilter(_trace_filter)
+    proxy_logger.addHandler(pfh)
 
 
 _setup_app_logging()

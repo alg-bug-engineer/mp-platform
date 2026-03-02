@@ -11,6 +11,10 @@ from bs4 import BeautifulSoup
 import os
 from datetime import datetime
 from core.config import cfg
+from core.proxy_pool import proxy_pool
+
+# 启动代理池
+proxy_pool.start()
 
 class WXArticleFetcher:
     """微信公众号文章获取器
@@ -251,134 +255,183 @@ class WXArticleFetcher:
                 }
             }
         
-        try:
-            self.controller.start_browser()
-            self.page = self.controller.page
-            print_warning(f"Get:{url} Wait:{self.wait_timeout}")
-            self.controller.open_url(url)
-            page = self.page
-            
-            # 等待页面加载
-            body = page.locator("body").text_content().strip()
-            
-            info["content"] = body
-            if "当前环境异常，完成验证后即可继续访问" in body:
-                info["content"] = ""
-                Wait(min=10, max=20, tips="当前环境异常，完成验证后即可继续访问")
-                raise Exception("当前环境异常，完成验证后即可继续访问")
-            
-            if "该内容已被发布者删除" in body or "The content has been deleted by the author." in body:
-                info["content"] = "DELETED"
-                raise Exception("该内容已被发布者删除")
-                
-            if "内容审核中" in body:
-                info['content'] = "DELETED"
-                raise Exception("内容审核中")
-                
-            if "该内容暂时无法查看" in body:
-                info["content"] = "DELETED"
-                raise Exception("该内容暂时无法查看")
-                
-            if "违规无法查看" in body:
-                info["content"] = "DELETED"
-                raise Exception("违规无法查看")
-                
-            if "发送失败无法查看" in body:
-                info["content"] = "DELETED"
-                raise Exception("发送失败无法查看")
-                
-            if "Unable to view this content because it violates regulation" in body:     
-                info["content"] = "DELETED"
-                raise Exception("违规无法查看")
-
-            # 获取标题
-            title = page.locator('meta[property="og:title"]').get_attribute("content") or ""
-            # 获取作者
-            author = page.locator('meta[property="og:article:author"]').get_attribute("content") or ""
-            # 获取描述
-            description = page.locator('meta[property="og:description"]').get_attribute("content") or ""
-            # 获取题图
-            topic_image = page.locator('meta[property="twitter:image"]').get_attribute("content") or ""
-
-            if title:
-                self.export_to_pdf(f"./data/{title}.pdf")
-            else:
-                title = page.evaluate('() => document.title')
-            
-            # 获取正文内容和图片
-            content_element = page.locator("#js_content")
-            content = ""
+        # 尝试次数
+        max_retries = 3
+        current_proxy = None
+        
+        for attempt in range(max_retries):
             try:
-                content = content_element.inner_html()
-            except:
-                content_element = page.locator("#js_article")
+                print_info(f"正在尝试获取文章内容 (尝试 {attempt + 1}/{max_retries}): {url}")
+                if current_proxy:
+                    print_info(f"使用代理: {current_proxy}")
+                
+                self.controller.start_browser(proxy=current_proxy)
+                self.page = self.controller.page
+                print_warning(f"Get:{url} Wait:{self.wait_timeout}")
+                
+                # 记录页面打开前的时间
+                start_time = time.time()
+                self.controller.open_url(url)
+                print_info(f"页面加载耗时: {time.time() - start_time:.2f}s")
+                
+                page = self.page
+                
+                # 等待页面加载
+                body_element = page.locator("body")
+                body = body_element.text_content().strip()
+                
+                info["content"] = body
+                if "当前环境异常，完成验证后即可继续访问" in body:
+                    info["content"] = ""
+                    print_warning(f"检测到环境异常 (尝试 {attempt + 1})")
+                    
+                    if attempt < max_retries - 1:
+                        # 换个代理试试
+                        new_proxy = proxy_pool.get_proxy()
+                        if new_proxy:
+                            current_proxy = f"http://{new_proxy}"
+                            print_info(f"已从代理池获取新代理: {current_proxy}")
+                        else:
+                            print_warning("代理池目前没有可用代理，尝试直接等待...")
+                        
+                        Wait(min=5, max=10, tips="环境异常，切换代理或等待后重试")
+                        self.Close()
+                        continue
+                    else:
+                        raise Exception("当前环境异常，已达到最大重试次数")
+                
+                if "该内容已被发布者删除" in body or "The content has been deleted by the author." in body:
+                    info["content"] = "DELETED"
+                    raise Exception("该内容已被发布者删除")
+                    
+                if "内容审核中" in body:
+                    info['content'] = "DELETED"
+                    raise Exception("内容审核中")
+                    
+                if "该内容暂时无法查看" in body:
+                    info["content"] = "DELETED"
+                    raise Exception("该内容暂时无法查看")
+                    
+                if "违规无法查看" in body:
+                    info["content"] = "DELETED"
+                    raise Exception("违规无法查看")
+                    
+                if "发送失败无法查看" in body:
+                    info["content"] = "DELETED"
+                    raise Exception("发送失败无法查看")
+                    
+                if "Unable to view this content because it violates regulation" in body:     
+                    info["content"] = "DELETED"
+                    raise Exception("违规无法查看")
+
+                # 获取标题
+                title = page.locator('meta[property="og:title"]').get_attribute("content") or ""
+                # 获取作者
+                author = page.locator('meta[property="og:article:author"]').get_attribute("content") or ""
+                # 获取描述
+                description = page.locator('meta[property="og:description"]').get_attribute("content") or ""
+                # 获取题图
+                topic_image = page.locator('meta[property="twitter:image"]').get_attribute("content") or ""
+
+                if title:
+                    self.export_to_pdf(f"./data/{title}.pdf")
+                else:
+                    title = page.evaluate('() => document.title')
+                
+                # 获取正文内容和图片
+                content_element = page.locator("#js_content")
+                content = ""
                 try:
                     content = content_element.inner_html()
                 except:
-                    pass
+                    content_element = page.locator("#js_article")
+                    try:
+                        content = content_element.inner_html()
+                    except:
+                        pass
 
-            content = self.clean_article_content(str(content))
-            
-            # 获取图像资源
-            images = []
-            try:
-                images = [
-                    img.get_attribute("data-src") or img.get_attribute("src")
-                    for img in content_element.locator("img").all()
-                    if img.get_attribute("data-src") or img.get_attribute("src")
-                ]
-            except:
-                pass
+                content = self.clean_article_content(str(content))
                 
-            if images and len(images) > 0:
-                info["pic_url"] = images[0]
-
-            publish_time = ""
-            try:
-                # 获取发布时间
-                publish_time_element = page.locator("#publish_time")
-                publish_time_str = publish_time_element.text_content().strip()
-                # 将发布时间转换为时间戳
-                publish_time = self.convert_publish_time_to_timestamp(publish_time_str)
-            except Exception as e:
-                print_warning(f"获取作者和发布时间失败: {e}")
-            
-            info.update({
-                "title": title,
-                "publish_time": publish_time,
-                "content": content,
-                "images": images,
-                "author": author,
-                "description": description,
-                "topic_image": topic_image
-            })
-
-            if info["content"] != "DELETED":
+                # 获取图像资源
+                images = []
                 try:
-                    # 获取公众号信息
-                    ele_logo = page.locator('#js_like_profile_bar .wx_follow_avatar img')
-                    logo_src = ele_logo.get_attribute('src')
-
-                    # 获取公众号名称
-                    mp_name = page.evaluate('() => $("#js_wx_follow_nickname").text()')
-                    biz = page.evaluate('() => window.biz')
+                    images = [
+                        img.get_attribute("data-src") or img.get_attribute("src")
+                        for img in content_element.locator("img").all()
+                        if img.get_attribute("data-src") or img.get_attribute("src")
+                    ]
+                except:
+                    pass
                     
-                    info["mp_info"] = {
-                        "mp_name": mp_name,
-                        "logo": logo_src,
-                        "biz": biz or self.extract_biz_from_source(url, page), 
-                    }
-                    if info["mp_info"]["biz"]:
-                        info["mp_id"] = "MP_WXS_" + base64.b64decode(info["mp_info"]["biz"]).decode("utf-8")
-                except Exception as e:
-                    print_error(f"获取公众号信息失败: {str(e)}")
+                if images and len(images) > 0:
+                    info["pic_url"] = images[0]
 
-        except Exception as e:
-            print_error(f"文章内容获取失败: {str(e)}")
-            if 'body' in locals():
-                print_warning(f"页面内容预览: {body[:100]}...")
-        finally:
-            self.Close()
+                publish_time = ""
+                try:
+                    # 获取发布时间
+                    publish_time_element = page.locator("#publish_time")
+                    publish_time_str = publish_time_element.text_content().strip()
+                    # 将发布时间转换为时间戳
+                    publish_time = self.convert_publish_time_to_timestamp(publish_time_str)
+                except Exception as e:
+                    print_warning(f"获取作者和发布时间失败: {e}")
+                
+                info.update({
+                    "title": title,
+                    "publish_time": publish_time,
+                    "content": content,
+                    "images": images,
+                    "author": author,
+                    "description": description,
+                    "topic_image": topic_image
+                })
+
+                if info["content"] != "DELETED":
+                    try:
+                        # 获取公众号信息
+                        ele_logo = page.locator('#js_like_profile_bar .wx_follow_avatar img')
+                        logo_src = ele_logo.get_attribute('src')
+
+                        # 获取公众号名称
+                        mp_name = page.evaluate('() => $("#js_wx_follow_nickname").text()')
+                        biz = page.evaluate('() => window.biz')
+                        
+                        info["mp_info"] = {
+                            "mp_name": mp_name,
+                            "logo": logo_src,
+                            "biz": biz or self.extract_biz_from_source(url, page), 
+                        }
+                        if info["mp_info"]["biz"]:
+                            info["mp_id"] = "MP_WXS_" + base64.b64decode(info["mp_info"]["biz"]).decode("utf-8")
+                    except Exception as e:
+                        print_error(f"获取公众号信息失败: {str(e)}")
+                
+                # 如果成功获取内容，跳出重试循环
+                break
+
+            except Exception as e:
+                print_error(f"文章内容获取失败 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+                if 'body' in locals():
+                    print_warning(f"页面内容预览: {body[:100]}...")
+                
+                if attempt < max_retries - 1:
+                    # 只有在由于非删除原因导致的失败时才重试
+                    if "已被发布者删除" not in str(e) and "内容审核中" not in str(e):
+                        # 换个代理试试
+                        new_proxy = proxy_pool.get_proxy()
+                        if new_proxy:
+                            current_proxy = f"http://{new_proxy}"
+                            print_info(f"已从代理池获取新代理进行下一次尝试: {current_proxy}")
+                        
+                        Wait(min=3, max=7, tips="获取失败，准备重试")
+                        self.Close()
+                        continue
+                
+                # 如果是最后一次尝试或不可重试错误，重新抛出异常
+                self.Close()
+                # raise # 不一定要 raise，原代码是返回 info
+            finally:
+                self.Close()
             
         return info
     def Close(self):

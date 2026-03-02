@@ -91,7 +91,7 @@ class PlaywrightController:
             print(f"自动安装浏览器失败({browser_name}): {install_err}")
             return False
 
-    def start_browser(self, headless=True, mobile_mode=False, dis_image=True, browser_name=browsers_name, language="zh-CN", anti_crawler=True):
+    def start_browser(self, headless=True, mobile_mode=False, dis_image=True, browser_name=browsers_name, language="zh-CN", anti_crawler=True, proxy=None):
         try:
             # 使用线程锁确保线程安全
             if  str(os.getenv("NOT_HEADLESS",False))=="True":
@@ -101,8 +101,9 @@ class PlaywrightController:
 
             if self.system != "windows":
                 headless = True
-            # 获取系统代理设置
-            proxy_server = os.getenv("https_proxy") or os.getenv("http_proxy") or os.getenv("ALL_PROXY")
+            
+            # 优先使用传入的 proxy，如果没有则尝试获取系统代理设置
+            proxy_server = proxy or os.getenv("https_proxy") or os.getenv("http_proxy") or os.getenv("ALL_PROXY")
             if self.driver is None:
                 if sys.platform == "win32" :
                     # 设置事件循环策略为WindowsSelectorEventLoopPolicy

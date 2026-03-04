@@ -54,155 +54,160 @@ def push_to_csdn(
         logger.error("%s", msg)
         return False, msg, True
 
-    # ── 2. 导入 Playwright ──
+    # ── 2. 导入 Playwright 相关 ──
     try:
-        from playwright.sync_api import sync_playwright
+        from driver.playwright_driver import PlaywrightController
     except ImportError:
-        msg = "Playwright 未安装，请执行 pip install playwright && playwright install chromium"
+        msg = "Playwright 未安装或 PlaywrightController 导入失败"
         logger.error("依赖缺失: %s", msg)
         return False, msg, False
 
+    controller = PlaywrightController()
     # ── 3. 启动浏览器，恢复 storage_state ──
     try:
-        with sync_playwright() as p:
-            log_event(logger, E.CSDN_PUSH_BROWSER_LAUNCH, elapsed=_elapsed())
-            browser = p.chromium.launch(headless=True)
-            # 直接用 storage_state 恢复会话，无需手动注入 cookies
-            context = browser.new_context(storage_state=storage_state)
-            page = context.new_page()
+        log_event(logger, E.CSDN_PUSH_BROWSER_LAUNCH, elapsed=_elapsed())
+        
+        # 明确禁用代理，CSDN 发布不需要代理
+        controller.start_browser(headless=True, proxy="none")
+        browser = controller.browser
+        
+        # 使用 storage_state 恢复会话
+        # 注意：controller.start_browser 已经创建了一个默认 context 和 page
+        # 我们需要关闭它们并重新创建一个带有 storage_state 的 context
+        if controller.page:
+            controller.page.close()
+        if controller.context:
+            controller.context.close()
+            
+        controller.context = browser.new_context(storage_state=storage_state)
+        page = controller.context.new_page()
+        controller.page = page
 
-            # ── 3a. 打开编辑器页面 ──
-            logger.info("[%s] 正在打开编辑器: %s", _elapsed(), EDITOR_URL)
-            try:
-                page.goto(EDITOR_URL, timeout=60000)
-            except Exception as e:
-                _take_screenshot(page, "csdn_goto_fail", _elapsed())
-                browser.close()
-                msg = f"打开编辑页面失败: {e}"
-                logger.error("[%s] %s", _elapsed(), msg)
-                return False, msg, False
+        # ── 3a. 打开编辑器页面 ──
+        logger.info("[%s] 正在打开编辑器: %s", _elapsed(), EDITOR_URL)
+        try:
+            page.goto(EDITOR_URL, timeout=60000)
+        except Exception as e:
+            _take_screenshot(page, "csdn_goto_fail", _elapsed())
+            msg = f"打开编辑页面失败: {e}"
+            logger.error("[%s] %s", _elapsed(), msg)
+            return False, msg, False
 
+        current_url = page.url
+        logger.info("[%s] 页面跳转后 URL: %s", _elapsed(), current_url)
+
+        # 判断是否被重定向到登录页 → 需要重新扫码
+        if "login" in current_url or "passport" in current_url:
+            _take_screenshot(page, "csdn_login_redirect", _elapsed())
+            msg = "CSDN 登录态已失效（被重定向到登录页），请重新扫码登录"
+            log_event(logger, E.CSDN_PUSH_NEED_REAUTH, elapsed=_elapsed(), url=current_url)
+            return False, msg, True
+
+        # ── 3b. 等待编辑器就绪 ──
+        editor_selector = 'pre.editor__inner.markdown-highlighting[contenteditable="true"]'
+        logger.info("[%s] 等待编辑器元素: %r", _elapsed(), editor_selector)
+        try:
+            page.wait_for_selector(editor_selector, timeout=20000)
+            log_event(logger, E.CSDN_PUSH_EDITOR_READY, elapsed=_elapsed())
+        except Exception:
             current_url = page.url
-            logger.info("[%s] 页面跳转后 URL: %s", _elapsed(), current_url)
-
-            # 判断是否被重定向到登录页 → 需要重新扫码
+            _take_screenshot(page, "csdn_editor_timeout", _elapsed())
             if "login" in current_url or "passport" in current_url:
-                _take_screenshot(page, "csdn_login_redirect", _elapsed())
-                browser.close()
-                msg = "CSDN 登录态已失效（被重定向到登录页），请重新扫码登录"
-                log_event(logger, E.CSDN_PUSH_NEED_REAUTH, elapsed=_elapsed(), url=current_url)
+                msg = "CSDN 登录态已失效（等待编辑器时被重定向），请重新扫码登录"
                 return False, msg, True
+            msg = f"编辑器加载超时（20s），当前 URL: {current_url}"
+            logger.warning("[%s] %s", _elapsed(), msg)
+            return False, msg, False
 
-            # ── 3b. 等待编辑器就绪 ──
-            editor_selector = 'pre.editor__inner.markdown-highlighting[contenteditable="true"]'
-            logger.info("[%s] 等待编辑器元素: %r", _elapsed(), editor_selector)
-            try:
-                page.wait_for_selector(editor_selector, timeout=20000)
-                log_event(logger, E.CSDN_PUSH_EDITOR_READY, elapsed=_elapsed())
-            except Exception:
-                current_url = page.url
-                _take_screenshot(page, "csdn_editor_timeout", _elapsed())
-                browser.close()
-                if "login" in current_url or "passport" in current_url:
-                    msg = "CSDN 登录态已失效（等待编辑器时被重定向），请重新扫码登录"
-                    return False, msg, True
-                msg = f"编辑器加载超时（20s），当前 URL: {current_url}"
-                logger.warning("[%s] %s", _elapsed(), msg)
-                return False, msg, False
+        # ── 3c. 填充标题 ──
+        logger.info("[%s] 开始填充标题: %r", _elapsed(), title[:60])
+        title_ok = _fill_title(page, str(title or "")[:100])
+        logger.info("[%s] 标题填充%s", _elapsed(), "成功" if title_ok else "失败（未找到标题输入框）")
 
-            # ── 3c. 填充标题 ──
-            logger.info("[%s] 开始填充标题: %r", _elapsed(), title[:60])
-            title_ok = _fill_title(page, str(title or "")[:100])
-            logger.info("[%s] 标题填充%s", _elapsed(), "成功" if title_ok else "失败（未找到标题输入框）")
+        # ── 3d. 填充正文 ──
+        logger.info("[%s] 开始填充正文（%d 字符）", _elapsed(), len(content))
+        fill_ok, fill_method = _fill_editor_with_markdown(page, str(content or ""))
+        if not fill_ok:
+            _take_screenshot(page, "csdn_fill_fail", _elapsed())
+            msg = "正文填充失败，未找到可用编辑器选择器"
+            logger.error("[%s] %s", _elapsed(), msg)
+            return False, msg, False
+        log_event(logger, E.CSDN_PUSH_CONTENT_FILL, elapsed=_elapsed(), method=fill_method)
 
-            # ── 3d. 填充正文 ──
-            logger.info("[%s] 开始填充正文（%d 字符）", _elapsed(), len(content))
-            fill_ok, fill_method = _fill_editor_with_markdown(page, str(content or ""))
-            if not fill_ok:
-                _take_screenshot(page, "csdn_fill_fail", _elapsed())
-                browser.close()
-                msg = "正文填充失败，未找到可用编辑器选择器"
-                logger.error("[%s] %s", _elapsed(), msg)
-                return False, msg, False
-            log_event(logger, E.CSDN_PUSH_CONTENT_FILL, elapsed=_elapsed(), method=fill_method)
-
-            # ── 3e. 验证编辑器内容 ──
-            actual_len = _verify_editor_content(page)
-            log_event(logger, E.CSDN_PUSH_CONTENT_VERIFY, elapsed=_elapsed(),
-                      expected=len(content), actual=actual_len)
-            if actual_len < max(10, len(content) // 10):
-                _take_screenshot(page, "csdn_content_mismatch", _elapsed())
-                browser.close()
-                msg = (
-                    f"正文写入验证失败：期望 {len(content)} 字符，"
-                    f"编辑器实际读回 {actual_len} 字符。"
-                    f"CSDN 编辑器可能已更新，请排查选择器兼容性。"
-                )
-                logger.error("[%s] %s", _elapsed(), msg)
-                return False, msg, False
-
-            time.sleep(2)
-
-            # ── 3f. 点击发布按钮 ──
-            use_tags = tags if tags else DEFAULT_TAGS
-            logger.info("[%s] 开始点击发布按钮，标签=%s，粉丝可见=%s", _elapsed(), use_tags, fans_only)
-            published, publish_detail = _click_publish_buttons(page, tags=use_tags, fans_only=fans_only)
-
-            if not published:
-                screenshot_path = _take_screenshot(page, "csdn_publish_fail", _elapsed())
-                browser.close()
-                msg = f"发布流程未完成: {publish_detail}"
-                if screenshot_path:
-                    msg += f"  截图: {screenshot_path}"
-                logger.error("[%s] %s", _elapsed(), msg)
-                return False, msg, False
-
-            log_event(logger, E.CSDN_PUSH_PUBLISH_CLICK, elapsed=_elapsed(), detail=publish_detail[:120])
-
-            # ── 3g. 等待页面跳转，判断是否成功 ──
-            publish_success = False
-            try:
-                # 等待 URL 变化，成功通常会跳转到 creation/success 或类似路径
-                # 某些情况下也可能直接跳转到文章详情页
-                page.wait_for_url(lambda url: "success" in url.lower() or "details" in url.lower(), timeout=15000)
-                publish_success = True
-                article_url = page.url
-                logger.info("[%s] 检测到发布成功跳转: %s", _elapsed(), article_url)
-            except Exception:
-                # 如果没跳转，检查页面是否有成功提示
-                try:
-                    # 检查是否有包含"发布成功"文字的元素
-                    if page.get_by_text("发布成功").first.is_visible():
-                        publish_success = True
-                        logger.info("[%s] 检测到页面'发布成功'文字", _elapsed())
-                except:
-                    pass
-            
-            if not publish_success:
-                logger.warning("[%s] 未检测到明确的发布成功跳转，当前 URL: %s", _elapsed(), page.url)
-            
-            article_url = page.url
-            
-            # 截图记录
-            screenshot_path = _take_screenshot(page, "csdn_after_publish", _elapsed())
-            if screenshot_path:
-                logger.info("[%s] 发布后截图已保存: %s", _elapsed(), screenshot_path)
-
-            browser.close()
-            elapsed = _elapsed()
-
-            # 简化成功判断：只要走到这里，说明发布按钮已点击，认为是成功
-            # 从 URL 提取文章 ID（如果有）
-            article_id = ""
-            if "creation/success/" in article_url:
-                article_id = article_url.rstrip("/").rsplit("/", 1)[-1]
-            display_url = article_url if not article_id else (
-                f"{article_url}  （文章ID: {article_id}，审核通过后可在 CSDN 主页查看）"
+        # ── 3e. 验证编辑器内容 ──
+        actual_len = _verify_editor_content(page)
+        log_event(logger, E.CSDN_PUSH_CONTENT_VERIFY, elapsed=_elapsed(),
+                    expected=len(content), actual=actual_len)
+        if actual_len < max(10, len(content) // 10):
+            _take_screenshot(page, "csdn_content_mismatch", _elapsed())
+            msg = (
+                f"正文写入验证失败：期望 {len(content)} 字符，"
+                f"编辑器实际读回 {actual_len} 字符。"
+                f"CSDN 编辑器可能已更新，请排查选择器兼容性。"
             )
-            msg = f"CSDN 推送成功（{elapsed}）：{display_url}"
-            log_event(logger, E.CSDN_PUSH_COMPLETE, elapsed=elapsed, url=article_url)
-            logger.info("=" * 60)
-            return True, msg, False
+            logger.error("[%s] %s", _elapsed(), msg)
+            return False, msg, False
+
+        time.sleep(2)
+
+        # ── 3f. 点击发布按钮 ──
+        use_tags = tags if tags else DEFAULT_TAGS
+        logger.info("[%s] 开始点击发布按钮，标签=%s，粉丝可见=%s", _elapsed(), use_tags, fans_only)
+        published, publish_detail = _click_publish_buttons(page, tags=use_tags, fans_only=fans_only)
+
+        if not published:
+            screenshot_path = _take_screenshot(page, "csdn_publish_fail", _elapsed())
+            msg = f"发布流程未完成: {publish_detail}"
+            if screenshot_path:
+                msg += f"  截图: {screenshot_path}"
+            logger.error("[%s] %s", _elapsed(), msg)
+            return False, msg, False
+
+        log_event(logger, E.CSDN_PUSH_PUBLISH_CLICK, elapsed=_elapsed(), detail=publish_detail[:120])
+
+        # ── 3g. 等待页面跳转，判断是否成功 ──
+        publish_success = False
+        try:
+            # 等待 URL 变化，成功通常会跳转到 creation/success 或类似路径
+            # 某些情况下也可能直接跳转到文章详情页
+            page.wait_for_url(lambda url: "success" in url.lower() or "details" in url.lower(), timeout=15000)
+            publish_success = True
+            article_url = page.url
+            logger.info("[%s] 检测到发布成功跳转: %s", _elapsed(), article_url)
+        except Exception:
+            # 如果没跳转，检查页面是否有成功提示
+            try:
+                # 检查是否有包含"发布成功"文字的元素
+                if page.get_by_text("发布成功").first.is_visible():
+                    publish_success = True
+                    logger.info("[%s] 检测到页面'发布成功'文字", _elapsed())
+            except:
+                pass
+        
+        if not publish_success:
+            logger.warning("[%s] 未检测到明确的发布成功跳转，当前 URL: %s", _elapsed(), page.url)
+        
+        article_url = page.url
+        
+        # 截图记录
+        screenshot_path = _take_screenshot(page, "csdn_after_publish", _elapsed())
+        if screenshot_path:
+            logger.info("[%s] 发布后截图已保存: %s", _elapsed(), screenshot_path)
+
+        elapsed = _elapsed()
+
+        # 简化成功判断：只要走到这里，说明发布按钮已点击，认为是成功
+        # 从 URL 提取文章 ID（如果有）
+        article_id = ""
+        if "creation/success/" in article_url:
+            article_id = article_url.rstrip("/").rsplit("/", 1)[-1]
+        display_url = article_url if not article_id else (
+            f"{article_url}  （文章ID: {article_id}，审核通过后可在 CSDN 主页查看）"
+        )
+        msg = f"CSDN 推送成功（{elapsed}）：{display_url}"
+        log_event(logger, E.CSDN_PUSH_COMPLETE, elapsed=elapsed, url=article_url)
+        logger.info("=" * 60)
+        return True, msg, False
 
     except Exception as e:
         tb = traceback.format_exc()
@@ -210,6 +215,8 @@ def push_to_csdn(
         log_event(logger, E.CSDN_PUSH_FAIL, elapsed=_elapsed(), reason=str(e)[:200])
         logger.error("[%s] %s\n%s", _elapsed(), msg, tb)
         return False, msg, False
+    finally:
+        controller.cleanup()
 
 
 def _fill_title(page, title: str) -> bool:

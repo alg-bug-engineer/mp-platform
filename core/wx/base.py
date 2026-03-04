@@ -79,6 +79,7 @@ class WxGather:
         self._runtime_user_agent = ""
         self.start_time = None  # 记录开始时间
         session=  requests.Session()
+        session.trust_env = False  # 禁用系统代理
         timeout = (5, 10)  
         session.timeout = timeout
         self.session=session
@@ -203,7 +204,7 @@ class WxGather:
             return
         data={}
         try:
-            response = requests.get(
+            response = self.session.get(
             url,
             params=params,
             headers=headers,

@@ -98,14 +98,18 @@ async def _qr_session_async(owner_id: str) -> None:
 
     try:
         async with async_playwright() as p:
+            # 明确设置 proxy 为 None，Playwright 会回退到 NO_PROXY 环境变量
+            # 这在 main.py 中已经配置好了排除 csdn.net
             browser = await p.chromium.launch(
                 headless=True,
+                proxy={"server": "per-context"} if p._impl_obj._browser_type.name == "chromium" else None, # 这里的技巧：强制按 context 配置，若 context 没配则无代理
                 args=["--no-sandbox", "--disable-setuid-sandbox",
                       "--disable-dev-shm-usage", "--disable-gpu"],
             )
             context = await browser.new_context(
                 viewport={"width": 1280, "height": 800},
                 locale="zh-CN",
+                proxy={"server": "none"} # 明确指定此 context 不使用代理
             )
             page = await context.new_page()
 

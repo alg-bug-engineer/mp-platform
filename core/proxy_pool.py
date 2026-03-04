@@ -43,11 +43,19 @@ class ProxyPool:
         self.running = False
 
     def get_proxy(self) -> str:
-        """获取一个随机的有效代理"""
+        """获取一个随机的有效代理，排除禁止使用的 127.0.0.1:7890"""
         with self.lock:
             if not self.proxies:
                 return ""
-            return random.choice(list(self.proxies))
+            
+            # 过滤掉禁止使用的代理
+            forbidden_ips = ["127.0.0.1:7890", "localhost:7890"]
+            valid_proxies = [p for p in self.proxies if p not in forbidden_ips]
+            
+            if not valid_proxies:
+                return ""
+                
+            return random.choice(valid_proxies)
 
     def remove_proxy(self, proxy: str):
         """移除失效代理"""

@@ -43,6 +43,7 @@ class WeChatAPI:
         self.last_login_error = ""
         self.fingerprint = self._generate_uuid()
         self.session = requests.Session()
+        self.session.trust_env = False  # 禁止使用系统代理（如 127.0.0.1:7890）
         self.token = None
         self.cookies_dict=[]
         self.cookies:Optional[Dict[str,str]] = {}

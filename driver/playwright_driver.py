@@ -91,6 +91,35 @@ class PlaywrightController:
             print(f"自动安装浏览器失败({browser_name}): {install_err}")
             return False
 
+    def _get_valid_proxy(self, proxy: any = None) -> str:
+        """获取有效的代理服务器地址，过滤掉禁止使用的 127.0.0.1:7890"""
+        # 如果明确指定不使用代理
+        if proxy is False or str(proxy).lower() == "none":
+            return None
+
+        # 1. 优先使用传入的参数
+        # 2. 其次尝试环境变量
+        proxy_server = proxy
+        if not proxy_server:
+            # 依次检查各常见代理环境变量（大小写兼容）
+            for env_name in ["https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"]:
+                val = os.getenv(env_name)
+                if val:
+                    proxy_server = val
+                    break
+        
+        if not proxy_server or not isinstance(proxy_server, str):
+            return None
+            
+        # 检查是否包含禁止使用的代理地址
+        forbidden_proxies = ["127.0.0.1:7890", "localhost:7890"]
+        for forbidden in forbidden_proxies:
+            if forbidden in proxy_server:
+                print(f"警告: 检测到禁止使用的代理 {forbidden}，已从系统设置中获取到，但根据项目规则已忽略。")
+                return None
+                
+        return proxy_server
+
     def start_browser(self, headless=True, mobile_mode=False, dis_image=True, browser_name=browsers_name, language="zh-CN", anti_crawler=True, proxy=None):
         try:
             # 使用线程锁确保线程安全
@@ -102,8 +131,9 @@ class PlaywrightController:
             if self.system != "windows":
                 headless = True
             
-            # 优先使用传入的 proxy，如果没有则尝试获取系统代理设置
-            proxy_server = proxy or os.getenv("https_proxy") or os.getenv("http_proxy") or os.getenv("ALL_PROXY")
+            # 获取经过验证的代理
+            proxy_server = self._get_valid_proxy(proxy)
+            
             if self.driver is None:
                 if sys.platform == "win32" :
                     # 设置事件循环策略为WindowsSelectorEventLoopPolicy

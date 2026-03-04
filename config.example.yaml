@@ -96,6 +96,8 @@ article:
 gather:
   #是否采集内容  默认False
   content: ${GATHER.CONTENT:-False}
+  #采集任务执行的小时 (0-23)，默认 7 点
+  hour: ${GATHER.HOUR:-7}
   #采集模式，web模式（可采集到发布链接)，api模式（可采集临时链接），app模式（采集最新消息）
   model: ${GATHER.MODEL:-web}
   #是否自动检查未采集文章内容，默认False
@@ -205,3 +207,9 @@ site:
   name: ${SITE_NAME:-Content Studio}
   description: ${SITE_DESCRIPTION:-A commercial WeChat content studio}
   keywords: ${SITE_KEYWORDS:-}
+
+qiniu:
+  access_key: "${QINIU_ACCESS_KEY}"
+  secret_key: "${QINIU_SECRET_KEY}"
+  bucket: "${QINIU_BUCKET}"
+  domain: "${QINIU_DOMAIN}"

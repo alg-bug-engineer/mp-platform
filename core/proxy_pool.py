@@ -23,7 +23,9 @@ class ProxyPool:
         self.fetchers = [
             self._fetch_ip3366,
             self._fetch_kuaidaili,
-            self._fetch_xsdaili
+            self._fetch_xsdaili,
+            self._fetch_proxyscrape,
+            self._fetch_openproxy
         ]
 
     def start(self):
@@ -137,7 +139,8 @@ class ProxyPool:
         test_url = "http://httpbin.org/ip"
         try:
             proxies = {"http": f"http://{proxy}", "https": f"http://{proxy}"}
-            resp = requests.get(test_url, proxies=proxies, timeout=5)
+            # 缩短超时时间到 3s，提高筛选效率
+            resp = requests.get(test_url, proxies=proxies, timeout=3)
             if resp.status_code == 200:
                 logger.debug(f"代理有效: {proxy}")
                 return True
@@ -147,6 +150,34 @@ class ProxyPool:
         return False
 
     # --- 具体的抓取实现 ---
+
+    def _fetch_proxyscrape(self) -> List[str]:
+        """抓取 ProxyScrape (免费 API)"""
+        ips = []
+        url = "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all"
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                for line in resp.text.splitlines():
+                    if ":" in line:
+                        ips.append(line.strip())
+        except Exception as e:
+            logger.error(f"ProxyScrape 抓取异常: {e}")
+        return ips
+
+    def _fetch_openproxy(self) -> List[str]:
+        """抓取 OpenProxy.space (免费 API)"""
+        ips = []
+        url = "https://api.openproxy.space/lists/http"
+        try:
+            # 这里的接口可能返回JSON或文本，根据常见公开API适配
+            resp = requests.get(url, timeout=10)
+            matches = re.findall(r'(\d+\.\d+\.\d+\.\d+):(\d+)', resp.text)
+            for ip, port in matches:
+                ips.append(f"{ip}:{port}")
+        except:
+            pass
+        return ips
 
     def _fetch_ip3366(self) -> List[str]:
         """抓取云代理 (ip3366.net)"""

@@ -364,13 +364,23 @@ class Wx:
             
             # 定位二维码区域
             qr_tag=".login__type__container__scan__qrcode"
+            
+            # 等待二维码元素出现
+            try:
+                page.wait_for_selector(qr_tag, timeout=15000)
+            except Exception as e:
+                print_error(f"等待二维码元素超时: {str(e)}")
+                raise Exception("微信登录页面加载超时或被拦截")
+
             # 获取二维码图片URL
             qrcode = page.query_selector(qr_tag)
-            code_src=qrcode.get_attribute("src")
-            print("正在生成二维码图片...")
-            print(f"code_src:{code_src}")
-            # qrcode = page.query_selector(qr_tag)
-           
+            code_src = qrcode.get_attribute("src")
+            print(f"正在生成二维码图片... code_src: {code_src}")
+            
+            if not code_src:
+                # 备选方案：如果拿不到 src，尝试直接对区域截图
+                print_warning("无法获取二维码 src，尝试直接对元素区域截图...")
+            
             # 使用Playwright截图功能（添加异常处理）
             qrcode.screenshot(path=self.wx_login_url)
 

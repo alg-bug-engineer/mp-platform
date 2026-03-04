@@ -131,8 +131,15 @@ class PlaywrightController:
             if self.system != "windows":
                 headless = True
             
-            # 获取经过验证的代理
+            # 优先使用传入的代理，如果没有，则从代理池获取
             proxy_server = self._get_valid_proxy(proxy)
+            if not proxy_server:
+                from core.proxy_pool import proxy_pool
+                if not proxy_pool.running:
+                    proxy_pool.start()
+                proxy_server = proxy_pool.get_proxy()
+                if proxy_server:
+                    print(f"从代理池获取随机代理: {proxy_server}")
             
             if self.driver is None:
                 if sys.platform == "win32" :
@@ -143,6 +150,14 @@ class PlaywrightController:
 
             preferred = (browser_name or browsers_name or "chromium").lower()
             candidates = [preferred] + [name for name in ("chromium", "firefox", "webkit") if name != preferred]
+            
+            # 获取随机反爬配置 (UA 等)
+            anti_config = {}
+            if anti_crawler:
+                from driver.anti_crawler_config import AntiCrawlerConfig
+                anti_config = AntiCrawlerConfig.get_anti_detection_config(mobile_mode)
+                print(f"应用随机反爬配置, UA: {anti_config.get('user_agent', '')[:50]}...")
+
             print(f"启动浏览器: 优先={preferred}, 无头模式={headless}, 移动模式={mobile_mode}, 反爬虫={anti_crawler}")
             # 设置启动选项
             launch_options = {
@@ -163,11 +178,11 @@ class PlaywrightController:
             # 关键修复：如果存在系统代理，让 Chromium 使用它
             if proxy_server:
                 # Playwright 代理格式转换：http://127.0.0.1:7890
+                # 统一格式 http://ip:port
+                if not proxy_server.startswith("http"):
+                    proxy_server = f"http://{proxy_server}"
                 launch_options["proxy"] = {
                     "server": proxy_server,
-                    # 如果代理需要认证，取消下面注释并设置环境变量
-                    # "username": os.getenv("PROXY_USER", ""),
-                    # "password": os.getenv("PROXY_PASS", "")
                 }
                 print(f"使用代理: {proxy_server}")
             
@@ -211,8 +226,10 @@ class PlaywrightController:
                 "locale": language
             }
             
-            # 反爬虫配置
-            if anti_crawler:
+            # 合并反爬虫配置
+            if anti_crawler and anti_config:
+                context_options.update(anti_config)
+            elif anti_crawler:
                 context_options.update(self._get_anti_crawler_config(mobile_mode))
             
             self.context = self.browser.new_context(**context_options)
@@ -220,8 +237,6 @@ class PlaywrightController:
             
             if mobile_mode:
                 self.page.set_viewport_size({"width": 375, "height": 812})
-            # else:
-            #     self.page.set_viewport_size({"width": 1920, "height": 1080})
 
             if dis_image:
                 self.context.route("**/*.{png,jpg,jpeg}", lambda route: route.abort())

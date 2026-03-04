@@ -142,10 +142,15 @@ def _setup_app_logging() -> None:
 
     # 文件 handler（可选，log.file 配置项）
     if _LOG_FILE:
-        fh = logging.handlers.RotatingFileHandler(
-            f"{_LOG_FILE}.log",
-            maxBytes=10 * 1024 * 1024,
-            backupCount=7,
+        log_dir = os.path.dirname(_LOG_FILE)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+            
+        fh = logging.handlers.TimedRotatingFileHandler(
+            _LOG_FILE if _LOG_FILE.endswith(".log") else f"{_LOG_FILE}.log",
+            when="midnight",
+            interval=1,
+            backupCount=30,
             encoding="utf-8",
         )
         fh.setLevel(_level)
@@ -181,18 +186,16 @@ def _setup_app_logging() -> None:
     # 确保 logs 目录存在
     os.makedirs("logs", exist_ok=True)
     
-    pfh = logging.handlers.RotatingFileHandler(
+    pfh = logging.handlers.TimedRotatingFileHandler(
         "logs/proxy.log",
-        maxBytes=5 * 1024 * 1024,
-        backupCount=3,
+        when="midnight",
+        interval=1,
+        backupCount=7,
         encoding="utf-8",
     )
     pfh.setFormatter(logging.Formatter(_FMT, datefmt=_DATE_FMT))
     pfh.addFilter(_trace_filter)
     proxy_logger.addHandler(pfh)
-
-
-_setup_app_logging()
 
 
 _setup_app_logging()

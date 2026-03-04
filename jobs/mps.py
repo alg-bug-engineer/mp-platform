@@ -1237,17 +1237,50 @@ def start_job(job_id: str = None, owner_id: str = ""):
     if not tasks:
         logger.info("没有任务")
         return
-    tag = "定时采集"
+    
+    # 获取全局配置的抓取小时，默认 7 点
+    default_gather_hour = int(cfg.get("gather.hour", 7))
+    
     for task in tasks:
+        task_type = str(getattr(task, 'task_type', '') or 'crawl').strip() or 'crawl'
         cron_exp = task.cron_exp
+        
+        # 针对采集任务进行特殊逻辑处理
+        if task_type == 'crawl':
+            # 强制每天固定小时执行，不允许其他粒度
+            # 优先从任务自身的配置尝试解析小时，如果解析失败或格式不对，使用全局默认值
+            gather_hour = default_gather_hour
+            if cron_exp:
+                try:
+                    # 期待格式可能是 "0 0 7 * * *" 或 "7" 这种简写，或者标准的 cron
+                    # 这里我们强制转换为 "0 0 {hour} * * *" 格式
+                    parts = cron_exp.split()
+                    if len(parts) >= 3:
+                        # 尝试从 cron 表达式中提取小时 (通常是第3个参数)
+                        h = parts[2]
+                        if h.isdigit() and 0 <= int(h) <= 23:
+                            gather_hour = int(h)
+                    elif cron_exp.isdigit():
+                        h = int(cron_exp)
+                        if 0 <= h <= 23:
+                            gather_hour = h
+                except Exception as e:
+                    logger.warning("任务[%s] cron 表达式解析失败，使用默认小时 %d: %s", task.id, gather_hour, e)
+            
+            # 最终生成的 cron 表达式：每天 gather_hour 点 0 分 0 秒执行
+            final_cron = f"0 0 {gather_hour} * * *"
+            logger.info("采集任务[%s] 调度配置更新为每天 %d:00:00 (表达式: %s)", task.id, gather_hour, final_cron)
+            cron_exp = final_cron
+        
         if not cron_exp:
             logger.error("任务[%s]没有设置cron表达式", task.id)
             continue
 
-        job_id = scheduler.add_cron_job(add_job, cron_expr=cron_exp, args=[get_feeds(task), task], job_id=str(task.id), tag="定时采集")
-        log_event(logger, E.TASK_SCHEDULE_ADD, task_id=str(task.id), job_id=str(job_id))
+        job_id = scheduler.add_cron_job(add_job, cron_expr=cron_exp, args=[get_feeds(task), task], job_id=str(task.id), tag="定时任务")
+        log_event(logger, E.TASK_SCHEDULE_ADD, task_id=str(task.id), job_id=str(job_id), cron=cron_exp)
+    
     scheduler.start()
-    logger.info("启动任务")
+    logger.info("任务调度器已启动")
 
 
 def start_all_task():
